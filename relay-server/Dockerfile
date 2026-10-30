@@ -1,4 +1,4 @@
-# Build from the workspace root (it needs ../LightNet):
+# Build from the repository root (it needs LightNet/):
 #   docker build --platform linux/amd64 -f relay-server/Dockerfile -t lightnet-relay .
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src

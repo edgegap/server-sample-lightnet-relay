@@ -12,7 +12,7 @@ using LightNet.Relay;
 // it is addressed to, on the channel it came in on.
 //
 // Environment: RELAY_TCP_PORT (default 7777), RELAY_UDP_PORT (default 7777), RELAY_MAX_PEERS (default 256)
-// Exits when it gets SIGTERM / Ctrl+C, or after RELAY_IDLE_EXIT_SECONDS without any room (0 = never).
+// Exits when it gets SIGTERM / Ctrl+C, or after RELAY_IDLE_EXIT_SECONDS without any room (default 600, 0 = never).
 
 class RelayServer
 {
@@ -33,7 +33,7 @@ class RelayServer
         int tcpPort = Env("RELAY_TCP_PORT", RelayProtocol.DefaultPort);
         int udpPort = Env("RELAY_UDP_PORT", RelayProtocol.DefaultPort);
         int maxPeers = Env("RELAY_MAX_PEERS", 256);
-        int idleExit = Env("RELAY_IDLE_EXIT_SECONDS", 0);
+        int idleExit = Env("RELAY_IDLE_EXIT_SECONDS", 600);
         return new RelayServer().Run(tcpPort, udpPort, maxPeers, idleExit);
     }
 
