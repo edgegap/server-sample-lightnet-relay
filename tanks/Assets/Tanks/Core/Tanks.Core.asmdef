@@ -1,0 +1,16 @@
+{
+    "name": "Tanks.Core",
+    "rootNamespace": "Tanks",
+    "references": [
+        "LightNet.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,29 @@
+{
+    "name": "Tanks.Editor",
+    "rootNamespace": "",
+    "references": [
+        "Tanks.Core",
+        "Tanks.Mirror",
+        "Tanks.FishNet",
+        "Tanks.PurrNet",
+        "Tanks.NGO",
+        "Mirror",
+        "Mirror.Components",
+        "Mirror.Examples",
+        "FishNet.Runtime",
+        "PurrNet.Runtime",
+        "Unity.Netcode.Runtime",
+        "Unity.Netcode.Components"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

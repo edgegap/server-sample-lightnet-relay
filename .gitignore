@@ -4,3 +4,4 @@ relay-server/obj/
 tanks/UserSettings/
 tanks/build.log
 .vs/
+*.log
