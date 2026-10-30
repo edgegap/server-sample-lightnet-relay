@@ -68,7 +68,7 @@ docker run --rm -p 7777:7777/tcp -p 7777:7777/udp lightnet-relay:dev
 
 Open `tanks/` in Unity, pick a netcode (above) and press Play on `Assets/Tanks/Scenes/Boot.unity` (or open a `Tanks_<Netcode>` scene directly), or build with **Tanks > Build Windows client**. In the first game press **Host**: the room code appears in the HUD. In the second, type the code and press **Join room**.
 
-Automated test, with the relay running (all four netcodes, or name some):
+Automated test: it runs on Windows (from Git Bash) and needs the Windows client build first, made in Unity with **Tanks > Build Windows client** (`tanks/Builds/Windows/Tanks.exe`, not in the repository). With the relay running, test all four netcodes or name some:
 
 ```bash
 ./e2e.sh 127.0.0.1 7777
@@ -77,7 +77,7 @@ Automated test, with the relay running (all four netcodes, or name some):
 
 For each netcode it starts a host and a client. The client drives in circles and fires every second. It passes when both games see two tanks, both received reliable and unreliable data through the relay, both saw a projectile spawn, and the host saw the client's tank move.
 
-Relay settings (environment variables): `RELAY_TCP_PORT` and `RELAY_UDP_PORT` (default 7777), `RELAY_MAX_PEERS` (default 256), `RELAY_IDLE_EXIT_SECONDS` (exit when no room exists for that long; 0 = never).
+Relay settings (environment variables): `RELAY_TCP_PORT` and `RELAY_UDP_PORT` (default 7777), `RELAY_MAX_PEERS` (default 256), `RELAY_IDLE_EXIT_SECONDS` (exit when no room exists for that long, default 600, so an idle deployment on Edgegap stops; 0 = never).
 
 Game command line: `-netcode NAME -relay ADDRESS -relayPort PORT [-relayUdpPort UDP]`, then `-host [-codeFile PATH]` or `-join CODE`; for tests, `-e2e -expectTanks N -timeout S` and `-switchFrom NAME` (start on another netcode and switch at runtime).
 
@@ -106,3 +106,7 @@ The app version needs one port: 7777 with protocol `TCP/UDP` (two separate 7777 
 Tested on Edgegap on 2026-10-29: `./e2e.sh <host>.pr.edgegap.net <port>` through a relay deployed in Newark passed on Mirror, FishNet, PurrNet and NGO. One deployment serves many rooms; a lobby or matchmaker can also deploy one relay per match near the players.
 
 The `tanks/` project comes from commit `01d82b3` of edgegap/netcode-game-sample-unity-mirror-tanks.
+
+## License
+
+Apache License 2.0 (see [LICENSE](LICENSE)), the license of LightNet. Third-party code keeps its own license: Mirror (MIT, `tanks/Assets/Mirror`), FishNet (`tanks/Assets/FishNet/LICENSE.txt`) and ParrelSync (`tanks/Assets/ParrelSync/LICENSE.md`) in the project; PurrNet and NGO are installed as packages under theirs.

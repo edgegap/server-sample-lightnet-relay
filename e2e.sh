@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Two Tanks clients (host + joiner) through the LightNet relay, on one netcode or all four.
 # Usage: ./e2e.sh [relay-address] [port] [netcode...]     netcode: Mirror FishNet PurrNet NGO (default: all)
-# Expects: tanks/Builds/Windows/Tanks.exe (Tanks > Build Windows client) and a running relay (see README).
+# Runs on Windows (Git Bash). Expects tanks/Builds/Windows/Tanks.exe (Tanks > Build Windows client) and a running relay (see README).
 set -u
 cd "$(dirname "$0")"
 RELAY=${1:-127.0.0.1}
@@ -9,6 +9,7 @@ PORT=${2:-7777}
 shift $(( $# < 2 ? $# : 2 ))
 NETCODES=${*:-Mirror FishNet PurrNet NGO}
 EXE=tanks/Builds/Windows/Tanks.exe
+if [ ! -f "$EXE" ]; then echo "$EXE not found: open tanks/ in Unity and run Tanks > Build Windows client"; exit 1; fi
 FAILED=""
 
 for NC in $NETCODES; do
