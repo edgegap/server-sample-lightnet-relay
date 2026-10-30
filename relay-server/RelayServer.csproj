@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>lightnet-relay</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Thread.Abort is only a fallback in LightNet; it is guarded for .NET 8 -->
+    <NoWarn>SYSLIB0006</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same LightNet sources the Unity games use (the Unity package in ../LightNet) -->
+    <Compile Include="../LightNet/Runtime/**/*.cs" />
+  </ItemGroup>
+
+</Project>

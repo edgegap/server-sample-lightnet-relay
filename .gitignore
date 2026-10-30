@@ -1,0 +1,6 @@
+e2e-out/
+relay-server/bin/
+relay-server/obj/
+tanks/UserSettings/
+tanks/build.log
+.vs/

@@ -1,0 +1,7 @@
+{
+  "name": "com.lightnet.relay",
+  "version": "0.1.0",
+  "displayName": "LightNet + LightNet Relay",
+  "description": "LightNet (Ben1138/lightnet-unity) with NAT-friendly UDP, plus the client side of the LightNet relay server (rooms, codes, forwarding).",
+  "unity": "2021.3"
+}
