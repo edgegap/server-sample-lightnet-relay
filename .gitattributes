@@ -1,0 +1,2 @@
+*.sh text eol=lf
+relay-server/Dockerfile text eol=lf
