@@ -30,6 +30,9 @@ namespace LightNet.Relay
         public bool IsActive => service != null;
         public string RoomCode { get; private set; }
 
+        /// <summary>Payload bytes received from other players, per channel, by every peer in this process (for tests).</summary>
+        public static long TotalReceivedReliable, TotalReceivedUnreliable;
+
         NetworkService service;
         ConnectionHandle relay;
         string joinCode;
@@ -140,13 +143,29 @@ namespace LightNet.Relay
                     OnPeerLeft?.Invoke(RelayProtocol.ReadPeerId(msg));
                     break;
                 case RelayMsg.FromPeer:
-                    if (IsReady) OnPeerData?.Invoke(RelayProtocol.ReadPeerId(msg), RelayProtocol.ReadPayload(msg, true), channel);
+                    if (IsReady)
+                    {
+                        ArraySegment<byte> payload = RelayProtocol.ReadPayload(msg, true);
+                        Count(payload, channel);
+                        OnPeerData?.Invoke(RelayProtocol.ReadPeerId(msg), payload, channel);
+                    }
                     break;
                 case RelayMsg.FromHost:
                     // unreliable data can overtake the reliable Joined; drop it until we are in
-                    if (IsReady) OnHostData?.Invoke(RelayProtocol.ReadPayload(msg, false), channel);
+                    if (IsReady)
+                    {
+                        ArraySegment<byte> payload = RelayProtocol.ReadPayload(msg, false);
+                        Count(payload, channel);
+                        OnHostData?.Invoke(payload, channel);
+                    }
                     break;
             }
+        }
+
+        static void Count(ArraySegment<byte> payload, ENetChannel channel)
+        {
+            if (channel == ENetChannel.Reliable) TotalReceivedReliable += payload.Count;
+            else TotalReceivedUnreliable += payload.Count;
         }
 
         void CloseWith(string reason)

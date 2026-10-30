@@ -1,0 +1,19 @@
+{
+    "name": "Tanks.NGO",
+    "rootNamespace": "",
+    "references": [
+        "Tanks.Core",
+        "LightNet.Runtime",
+        "Unity.Netcode.Runtime",
+        "Unity.Netcode.Components"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -6,6 +6,19 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Mirror/Examples/Tanks/Scenes/Scene.unity
-    guid: 83f9d2fb76f5742448c6e51f258327a2
+    path: Assets/Tanks/Scenes/Boot.unity
+    guid: f652a6423d67d6a45a79310a07060836
+  - enabled: 1
+    path: Assets/Tanks/Scenes/Tanks_Mirror.unity
+    guid: e1845d8a79106a94bbfb697c70fe3733
+  - enabled: 1
+    path: Assets/Tanks/Scenes/Tanks_FishNet.unity
+    guid: b42adf8da5287ec4a9d8b958e1bf5e52
+  - enabled: 1
+    path: Assets/Tanks/Scenes/Tanks_PurrNet.unity
+    guid: 6180ca3a6ada2c94d9b2e9c58e78dd28
+  - enabled: 1
+    path: Assets/Tanks/Scenes/Tanks_NGO.unity
+    guid: df288224022f5c6408731dc9cade30d9
   m_configObjects: {}
+  m_UseUCBPForAssetBundles: 0
