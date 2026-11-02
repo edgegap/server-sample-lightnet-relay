@@ -113,11 +113,24 @@ Off by default. With it on, players press **Find Match** instead of passing room
 
 The relay switches to match mode by itself when it finds `MM_TICKET_IDS`, which only the matchmaker injects. In match mode it hosts only that match's room, exits when the host leaves (or after `RELAY_IDLE_EXIT_SECONDS`, default 60, if nobody created the room), and stops its own Edgegap deployment (`ARBITRIUM_DELETE_URL`) so an ended match costs nothing. Any other relay works as before.
 
+### Join a running match (backfill)
+
+Once a match runs, the relay fills its free seats through the matchmaker, so players who press **Find Match** later join a running match instead of waiting for a new one, with no room code. While the match has fewer than `RELAY_MATCH_MAX_PLAYERS` (default 4) players in the room or on their way, the relay keeps up to two [backfills](https://docs.edgegap.com/learn/matchmaking/matchmaker-in-depth) open: tickets owned by the relay that carry its own address. When the matchmaker puts a player in one, that player gets `HOST_ASSIGNED` with this relay, asks for its role like the others and joins as a client. A seat freed by a leaving player opens a new backfill, and the relay deletes its backfills before it stops. The game needs nothing extra: the same Find Match flow.
+
+```
+ relay (match running, free seats) ──POST /backfills (its address + the players' tickets)──► matchmaker
+ late player: Find Match ──ticket──► matchmaker puts it in the backfill ──► HOST_ASSIGNED: this relay
+ relay sees the backfill ASSIGNED (polls every 2 s) → the ticket joins the match → MatchRole → joins the room
+```
+
+The profile in [`matchmaker-config.json`](matchmaker-config.json) is built for it: for its first 10 seconds a ticket can only go into a backfill (`min_team_size` 9999), so a player who searches while a match has room joins that match; after 10 seconds the usual rule applies and 2 to 4 waiting players get a new relay. Backfill needs two variables on the app version: `MATCHMAKER_URL` and `MATCHMAKER_TOKEN` (the matchmaker's API URL and Auth Token, the same client-safe values the game uses). Without them the relay logs `backfill: off` and matches never take late players. The code is in `relay-server/MatchBackfill.cs`, following the Edgegap Unity SDK's backfill flow.
+
 Set it up:
 
 1. Push the relay image and create an app version as in [On Edgegap](#on-edgegap), with the port named `relay`.
-2. In the Edgegap dashboard, **Matchmaker > Create Matchmaker**: upload [`matchmaker-config.json`](matchmaker-config.json) (profile `casual`, 2 to 4 players, 30 s ticket expiration) after setting `application.name` and `version` to your app version, then **Create and Start**.
-3. In `tanks/Assets/Tanks/Resources/TanksSettings.asset`, turn on `useMatchmaker` and paste the matchmaker's **API URL** and **Auth Token** (the token is safe to ship in a game: it gives no access to the Edgegap account). Or, on the command line: `-matchmaker URL -matchmakerToken TOKEN`, and `-findMatch` to search at start.
+2. In the Edgegap dashboard, **Matchmaker > Create Matchmaker**: upload [`matchmaker-config.json`](matchmaker-config.json) (matchmaker 3.3.3, profile `casual`, 10 s for backfill first, then 2 to 4 players, 30 s ticket expiration) after setting `application.name` and `version` to your app version, then **Create and Start**.
+3. For backfill, add `MATCHMAKER_URL` and `MATCHMAKER_TOKEN` (the matchmaker's API URL and Auth Token) as environment variables on the app version.
+4. In `tanks/Assets/Tanks/Resources/TanksSettings.asset`, turn on `useMatchmaker` and paste the matchmaker's **API URL** and **Auth Token** (the token is safe to ship in a game: it gives no access to the Edgegap account). Or, on the command line: `-matchmaker URL -matchmakerToken TOKEN`, and `-findMatch` to search at start.
 
 The client uses the [Edgegap Unity SDK](https://github.com/edgegap/sdk-unity-sessions-matchmaker-server-browser) (`com.edgegap.unity-sdk`); the code is in `Assets/Tanks/Core/TanksMatchmaker.cs`.
 
@@ -127,6 +140,7 @@ Automated test: two clients press Find Match and play one match through the rela
 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token>
 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token> FishNet NGO
 MM_WEBSOCKET=1 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token>   # over wss:// (relay-ws port)
+BACKFILL=1 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token>       # + a late third player, by backfill
 ```
 
 Tested on Edgegap on 2026-11-02 (matchmaker 3.3.2, free tier): passed on Mirror, FishNet, PurrNet and NGO, one relay deployment per match in Newark, each stopped by the relay itself (`TERMINATED`) when the host left.
