@@ -2,7 +2,8 @@
     "name": "Tanks.Core",
     "rootNamespace": "Tanks",
     "references": [
-        "LightNet.Runtime"
+        "LightNet.Runtime",
+        "Edgegap.SDK"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

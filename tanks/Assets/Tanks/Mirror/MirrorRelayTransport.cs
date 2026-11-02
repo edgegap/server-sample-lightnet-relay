@@ -23,6 +23,8 @@ namespace Tanks.MirrorRelay
         public int relayUdpPort = RelayProtocol.DefaultPort;
         [Tooltip("Code of the room to join (clients).")]
         public string roomCode = "";
+        /// <summary>Room code to create when hosting a matchmade match (from the relay), null otherwise.</summary>
+        [System.NonSerialized] public string hostRoomCode;
 
         /// <summary>The room code once hosting (share it with the other players).</summary>
         public string RoomCode => host?.RoomCode;
@@ -98,7 +100,7 @@ namespace Tanks.MirrorRelay
             };
             host.OnDisconnected = reason => Debug.LogWarning($"LightNet relay: host connection ended ({reason})");
             Debug.Log($"LightNet relay: creating a room on {HostRelayAddress()}:{relayTcpPort}/{relayUdpPort}");
-            host.Host(HostRelayAddress(), relayTcpPort, relayUdpPort);
+            host.Host(HostRelayAddress(), relayTcpPort, relayUdpPort, hostRoomCode);
         }
 
         public override void ServerSend(int connectionId, ArraySegment<byte> segment, int channelId = Channels.Reliable)

@@ -8,16 +8,20 @@ namespace LightNet.Relay
     /// one of these bytes (LightNet's "first byte is the message type" convention).<br/>
     /// One player hosts a room and gets a code; the others join with that code. The relay forwards
     /// client traffic to the host and host traffic to the client it is addressed to, on the channel
-    /// (reliable or unreliable) it arrived on.
+    /// (reliable or unreliable) it arrived on.<br/>
+    /// Match mode (a relay started by the Edgegap matchmaker for one match): each matched player asks
+    /// for its role with its ticket id (<see cref="MatchRole"/>). The first one hosts the match room,
+    /// the others join it; only matched tickets get the room code.
     /// </summary>
     public enum RelayMsg : byte
     {
         // peer -> relay
-        CreateRoom = 0x01,  // [] (host)
+        CreateRoom = 0x01,  // [] (host), or [code: ascii] in match mode: the code from MatchAssigned
         JoinRoom = 0x02,    // [code: ascii]
         ToHost = 0x03,      // [payload] (client)
         ToPeer = 0x04,      // [peerId: u32][payload] (host)
         KickPeer = 0x05,    // [peerId: u32] (host)
+        MatchRole = 0x06,   // [ticketId: ascii] (match mode, before hosting or joining)
 
         // relay -> peer
         RoomCreated = 0x10, // [code: ascii] (host)
@@ -28,6 +32,7 @@ namespace LightNet.Relay
         FromPeer = 0x15,    // [peerId: u32][payload] (host)
         FromHost = 0x16,    // [payload] (client)
         RoomClosed = 0x17,  // [] (client, the host left)
+        MatchAssigned = 0x18, // [isHost: u8][code: ascii] (answer to MatchRole; JoinFailed if the ticket is not in the match)
     }
 
     public static class RelayProtocol
