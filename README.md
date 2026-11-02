@@ -143,7 +143,7 @@ MM_WEBSOCKET=1 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token>  
 BACKFILL=1 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token>       # + a late third player, by backfill
 ```
 
-Tested on Edgegap on 2026-11-02 (matchmaker 3.3.2, free tier): passed on Mirror, FishNet, PurrNet and NGO, one relay deployment per match in Newark, each stopped by the relay itself (`TERMINATED`) when the host left.
+Tested on Edgegap on 2026-11-02 (matchmaker 3.3.2, free tier): passed on Mirror, FishNet, PurrNet and NGO, one relay deployment per match in Newark, each stopped by the relay itself (`TERMINATED`) when the host left. Later the same day with backfill and the 3.3.3 config above: `BACKFILL=1` passed on all four netcodes over TCP/UDP and over `wss://` (`MM_WEBSOCKET=1`): two players started a match, a third pressed Find Match once it ran and joined it through the relay's backfill, all three saw three tanks, and each relay stopped itself.
 
 ## Changes to LightNet
 
@@ -167,7 +167,7 @@ Upstream LightNet assumed a server that can reach its clients directly. To run a
 
 The app version needs one port: 7777 with protocol `TCP/UDP` (two separate 7777 TCP and 7777 UDP entries are rejected as duplicates). Edgegap maps both protocols to the same external port, so clients pass it once: `-relay <host>.pr.edgegap.net -relayPort <external port>`. Edgegap's readiness check opens a TCP connection at start, which shows in the relay log as a peer that connects and leaves.
 
-For the [WebSocket option](#security), add a second port: 7778, protocol `WS`, **TLS Upgrade** on, named `relay-ws`. Players connect to `wss://<host>.pr.edgegap.net:<its external port>`, by host name (the certificate is for `*.pr.edgegap.net`, not the IP).
+For the [WebSocket option](#security), add a second port: 7778, protocol `WS`, **TLS Upgrade** on, named `relay-ws`. Players connect to `wss://<host>.pr.edgegap.net:<its external port>`, by host name (the certificate is for `*.pr.edgegap.net`, not the IP). Tested on Edgegap on 2026-11-02: `./e2e.sh wss://<host>.pr.edgegap.net:<port> 0` and the mixed test (`CLIENT_RELAY`) passed on all four netcodes.
 
 Tested on Edgegap on 2026-10-29: `./e2e.sh <host>.pr.edgegap.net <port>` through a relay deployed in Newark passed on Mirror, FishNet, PurrNet and NGO. One deployment serves many rooms; a lobby or matchmaker can also deploy one relay per match near the players.
 
