@@ -25,6 +25,9 @@ using LightNet.Relay;
 // ask (MatchRole) hosts it, the others join it, and nobody else gets the room code. Joins that arrive
 // before the host has created the room wait for it. The relay stops when the match room closes, or
 // when nobody created it within RELAY_IDLE_EXIT_SECONDS (default 60 in match mode).
+// Join in progress: with MATCHMAKER_URL and MATCHMAKER_TOKEN set, the relay keeps backfills open on the matchmaker
+// while the match has free seats (RELAY_MATCH_MAX_PLAYERS, default 4), so players who press Find Match later join
+// the running match (MatchBackfill). Their tickets join the match when the matchmaker seats them.
 // On Edgegap the relay stops its own deployment (ARBITRIUM_DELETE_URL) when it exits on its own.
 
 class RelayServer
@@ -48,6 +51,12 @@ class RelayServer
     string matchHostTicket;
     bool matchStarted, matchOver;
     readonly List<ulong> waitingJoins = new List<ulong>();
+    MatchBackfill backfill;
+    int matchMaxPlayers;
+    readonly Dictionary<string, DateTime> onTheWay = new Dictionary<string, DateTime>();  // seated tickets not here yet
+    readonly List<(string ticket, DateTime since)> joining = new List<(string, DateTime)>(); // got their role, not in the room yet
+    readonly List<(ulong peer, string ticket, DateTime since)> pendingRoles = new List<(ulong, string, DateTime)>();
+    const double OnTheWaySeconds = 60, JoiningSeconds = 15, PendingRoleSeconds = 10;
 
     static int Main()
     {
@@ -77,7 +86,11 @@ class RelayServer
             return;
         }
         matchCode = NewCode();
-        Console.WriteLine($"match mode: match {Environment.GetEnvironmentVariable("MM_MATCH_ID") ?? "?"}, {matchTickets.Count} matched player(s)");
+        matchMaxPlayers = Env("RELAY_MATCH_MAX_PLAYERS", 4);
+        foreach (string ticket in matchTickets) onTheWay[ticket] = DateTime.UtcNow;
+        Console.WriteLine($"match mode: match {Environment.GetEnvironmentVariable("MM_MATCH_ID") ?? "?"}, {matchTickets.Count} matched player(s), up to {matchMaxPlayers}");
+        backfill = MatchBackfill.FromEnvironment(matchTickets);
+        if (backfill != null) backfill.OnTicketAssigned = Seated;
     }
 
     int Run(int tcpPort, int udpPort, int wsPort, int maxPeers, int idleExitSeconds, out bool stoppedItself)
@@ -95,7 +108,6 @@ class RelayServer
             if (!webSockets.Start(wsPort, maxPeers))
             {
                 net.Close();
-        webSockets.Stop();
                 FlushLogs();
                 return 1;
             }
@@ -128,6 +140,7 @@ class RelayServer
                 else if (ws.Message.Length > 0) Handle(ws.Peer, ws.Message, ws.Channel);
             }
 
+            if (backfill != null && matchStarted && !matchOver) UpdateBackfill();
             if (matchOver)
             {
                 Console.WriteLine("Match over, exiting");
@@ -149,7 +162,10 @@ class RelayServer
             Thread.Sleep(1);
         }
 
+        // no player must be sent here once the relay is stopping
+        backfill?.CloseAll();
         net.Close();
+        webSockets.Stop();
         Thread.Sleep(500);
         FlushLogs();
         return 0;
@@ -163,18 +179,20 @@ class RelayServer
             case RelayMsg.MatchRole:
             {
                 string ticket = RelayProtocol.ReadText(msg).Trim();
+                if (matchTickets != null && !matchTickets.Contains(ticket) && backfill != null && matchStarted)
+                {
+                    // maybe a backfilled player that got here before our next backfill poll: wait a little
+                    pendingRoles.Add((from, ticket, DateTime.UtcNow));
+                    backfill.PollSoon();
+                    return;
+                }
                 if (matchTickets == null || !matchTickets.Contains(ticket))
                 {
                     Send(from, ENetChannel.Reliable, RelayProtocol.Make(RelayMsg.JoinFailed, matchTickets == null ? "not a match relay" : "ticket not in this match"));
                     return;
                 }
                 // the first matched player to ask hosts; asking again gives the same answer
-                matchHostTicket ??= ticket;
-                bool isHost = ticket == matchHostTicket;
-                byte[] reply = RelayProtocol.Make(RelayMsg.MatchAssigned, " " + matchCode);
-                reply[1] = (byte)(isHost ? 1 : 0);
-                Send(from, ENetChannel.Reliable, reply);
-                Console.WriteLine($"peer {from}: ticket {ticket} {(isHost ? "hosts" : "joins")} the match");
+                AssignRole(from, ticket);
                 break;
             }
 
@@ -189,6 +207,7 @@ class RelayServer
                 }
                 room = new Room { Code = matchTickets != null ? matchCode : NewCode(), Host = from };
                 matchStarted = matchTickets != null;
+                if (matchStarted) joining.RemoveAll(j => j.ticket == matchHostTicket);
                 rooms[room.Code] = room;
                 roomOf[from] = room;
                 Send(from, ENetChannel.Reliable, RelayProtocol.Make(RelayMsg.RoomCreated, room.Code));
@@ -247,8 +266,55 @@ class RelayServer
         }
     }
 
+    void AssignRole(ulong peer, string ticket)
+    {
+        // the first matched player to ask hosts; asking again gives the same answer
+        matchHostTicket ??= ticket;
+        bool isHost = ticket == matchHostTicket;
+        byte[] reply = RelayProtocol.Make(RelayMsg.MatchAssigned, " " + matchCode);
+        reply[1] = (byte)(isHost ? 1 : 0);
+        Send(peer, ENetChannel.Reliable, reply);
+        onTheWay.Remove(ticket);
+        joining.RemoveAll(j => j.ticket == ticket);
+        joining.Add((ticket, DateTime.UtcNow));
+        Console.WriteLine($"peer {peer}: ticket {ticket} {(isHost ? "hosts" : "joins")} the match");
+    }
+
+    /// <summary>The matchmaker put a player's ticket in one of our backfills.</summary>
+    void Seated(string ticket)
+    {
+        matchTickets.Add(ticket);
+        onTheWay[ticket] = DateTime.UtcNow;
+        foreach (var pending in pendingRoles.Where(p => p.ticket == ticket).ToList())
+        {
+            pendingRoles.Remove(pending);
+            AssignRole(pending.peer, ticket);
+        }
+    }
+
+    void UpdateBackfill()
+    {
+        DateTime now = DateTime.UtcNow;
+        foreach (string t in onTheWay.Where(e => (now - e.Value).TotalSeconds > OnTheWaySeconds).Select(e => e.Key).ToList()) onTheWay.Remove(t);
+        joining.RemoveAll(j => (now - j.since).TotalSeconds > JoiningSeconds);
+        foreach (var pending in pendingRoles.Where(p => (now - p.since).TotalSeconds > PendingRoleSeconds).ToList())
+        {
+            pendingRoles.Remove(pending);
+            Send(pending.peer, ENetChannel.Reliable, RelayProtocol.Make(RelayMsg.JoinFailed, "ticket not in this match"));
+        }
+
+        // seats taken: players in the room, plus players on their way
+        backfill.Update(() =>
+        {
+            int inRoom = rooms.TryGetValue(matchCode, out Room room) ? 1 + room.Clients.Count : 0;
+            return matchMaxPlayers - inRoom - onTheWay.Count - joining.Count;
+        });
+    }
+
     void Join(ulong peer, Room room)
     {
+        // a player entering the match room is the oldest one that got a role (role and join come back to back)
+        if (room.Code == matchCode && joining.Count > 0) joining.RemoveAt(0);
         room.Clients.Add(peer);
         roomOf[peer] = room;
         // tell the host first: the client may start sending as soon as it is Joined
@@ -260,6 +326,7 @@ class RelayServer
     void Left(ulong id)
     {
         waitingJoins.Remove(id);
+        pendingRoles.RemoveAll(p => p.peer == id);
         if (!roomOf.TryGetValue(id, out Room room))
         {
             Console.WriteLine($"peer {id} disconnected");

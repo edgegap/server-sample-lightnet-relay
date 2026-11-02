@@ -1,5 +1,5 @@
 {
-  "version": "3.3.2",
+  "version": "3.3.3",
   "inspect": true,
   "max_deployment_retry_count": 3,
   "profiles": {
@@ -9,13 +9,22 @@
       "group_inactivity_removal_period": "5m",
       "application": {
         "name": "lightnet-relay",
-        "version": "20261102-1600"
+        "version": "20261102-1647"
       },
       "rules": {
         "initial": {
           "match_size": {
             "type": "player_count",
             "attributes": {
+              "team_count": 1,
+              "min_team_size": 9999,
+              "max_team_size": 9999
+            }
+          }
+        },
+        "expansions": {
+          "10": {
+            "match_size": {
               "team_count": 1,
               "min_team_size": 2,
               "max_team_size": 4
