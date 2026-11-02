@@ -127,19 +127,28 @@ namespace Tanks
                 case "HOST_ASSIGNED":
                     // read the assignment now: the SDK clears the group later
                     DeploymentDTO relay = current.Assignment;
-                    if (relay?.Ports == null || !relay.Ports.TryGetValue(settings.matchmakerPortName, out PortMappingDTO port)
+                    string portName = settings.matchmakerUseWebSocket ? settings.matchmakerWebSocketPortName : settings.matchmakerPortName;
+                    if (relay?.Ports == null || !relay.Ports.TryGetValue(portName, out PortMappingDTO port)
                         || !int.TryParse(port.External, out int external))
                     {
-                        Fail($"The relay has no port named '{settings.matchmakerPortName}'.");
+                        Fail($"The relay has no port named '{portName}'.");
                         return;
                     }
-                    settings.relayAddress = !string.IsNullOrEmpty(relay.PublicIP) ? relay.PublicIP : relay.Fqdn;
-                    // the relay's TCP/UDP port: one external port for both protocols
-                    settings.relayTcpPort = settings.relayUdpPort = external;
+                    if (settings.matchmakerUseWebSocket)
+                    {
+                        // TLS Upgrade: Edgegap's certificate is for the deployment's host name, not its IP
+                        settings.relayAddress = $"wss://{relay.Fqdn}:{external}";
+                    }
+                    else
+                    {
+                        settings.relayAddress = !string.IsNullOrEmpty(relay.PublicIP) ? relay.PublicIP : relay.Fqdn;
+                        // the relay's TCP/UDP port: one external port for both protocols
+                        settings.relayTcpPort = settings.relayUdpPort = external;
+                    }
                     ticketId = current.TicketID;
                     assigned = true;
                     roleAttempt = 0;
-                    Debug.Log($"Tanks matchmaker: relay for the match at {settings.relayAddress}:{external}, ticket {ticketId}");
+                    Debug.Log($"Tanks matchmaker: relay for the match at {settings.relayAddress}{(settings.matchmakerUseWebSocket ? "" : ":" + external)}, ticket {ticketId}");
                     RequestRole();
                     break;
                 case "CANCELLED":
