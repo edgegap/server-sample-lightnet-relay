@@ -33,6 +33,7 @@ namespace LightNet.Relay
         FromHost = 0x16,    // [payload] (client)
         RoomClosed = 0x17,  // [] (client, the host left)
         MatchAssigned = 0x18, // [isHost: u8][code: ascii] (answer to MatchRole; JoinFailed if the ticket is not in the match)
+        RoomTimedOut = 0x19,  // [] (host of a match room nobody else joined in time: find another match)
     }
 
     public static class RelayProtocol

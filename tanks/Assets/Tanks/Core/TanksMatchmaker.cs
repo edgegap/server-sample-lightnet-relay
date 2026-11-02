@@ -1,7 +1,11 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
 using Edgegap;
 using Edgegap.Matchmaking;
 using LightNet.Relay;
+using Newtonsoft.Json;
 using UnityEngine;
 
 namespace Tanks
@@ -55,9 +59,47 @@ namespace Tanks
             if (client == null || !IsHealthy || IsBusy) return;
             IsBusy = true;
             assigned = false;
+            if (!settings.matchmakerLatencyBeacons)
+            {
+                CreateTicket(null);
+                return;
+            }
+            Dictionary<string, float> fixedPings = ParseBeacons(Args.Value("-beacons"));
+            if (fixedPings != null)
+            {
+                CreateTicket(fixedPings); // tests: pretend to be somewhere else
+                return;
+            }
+            Status = "Measuring latency...";
+            client.Beacons(
+                beacons => client.MeasureBeaconsRoundTripTime(beacons.Beacons, CreateTicket),
+                (error, request) => Fail("Couldn't get the latency beacons."));
+        }
+
+        void CreateTicket(Dictionary<string, float> pings)
+        {
+            // 0 ms means the ping failed, not "closest"
+            Dictionary<string, float> beacons = pings?.Where(p => p.Value > 0).ToDictionary(p => p.Key, p => p.Value);
+            if (settings.matchmakerLatencyBeacons)
+            {
+                Debug.Log("Tanks matchmaker: beacons " + (beacons == null || beacons.Count == 0 ? "none measured" : string.Join(", ", beacons.Select(b => $"{b.Key} {b.Value:F0} ms"))));
+            }
             Status = "Searching for a match...";
             // abandon: the SDK starts with an empty group and refuses to create another without it
-            client.CreateGroup(new TanksGroupUpRequest(settings.matchmakerProfile), abandon: true);
+            client.CreateGroup(new TanksGroupUpRequest(settings.matchmakerProfile, settings.matchmakerLatencyBeacons ? beacons ?? new Dictionary<string, float>() : null), abandon: true);
+        }
+
+        /// <summary>"-beacons City=ms,City=ms": fixed pings instead of measuring them.</summary>
+        static Dictionary<string, float> ParseBeacons(string arg)
+        {
+            if (string.IsNullOrWhiteSpace(arg)) return null;
+            var beacons = new Dictionary<string, float>();
+            foreach (string pair in arg.Split(','))
+            {
+                string[] kv = pair.Split('=');
+                if (kv.Length == 2 && float.TryParse(kv[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float ms)) beacons[kv[0].Trim()] = ms;
+            }
+            return beacons;
         }
 
         public void Cancel()
@@ -192,17 +234,22 @@ namespace Tanks
         }
     }
 
-    /// <summary>Ticket attributes: none, the profile only has the player_count rule. Add one field per extra rule.</summary>
+    /// <summary>
+    /// Ticket attributes: one per rule of the profile, named like the rule. <c>beacons</c> is for the profile's
+    /// <c>latencies</c> rule (left out when <see cref="TanksSettings.matchmakerLatencyBeacons"/> is off).
+    /// </summary>
     public class TanksTicketAttributes
     {
+        [JsonProperty("beacons", NullValueHandling = NullValueHandling.Ignore)]
+        public Dictionary<string, float> Beacons;
     }
 
     /// <summary>A solo player is a group of one, ready at once.</summary>
     public class TanksGroupUpRequest : GroupUpRequestDTO<TanksTicketAttributes>
     {
-        public TanksGroupUpRequest(string profile) : base(profile, true)
+        public TanksGroupUpRequest(string profile, Dictionary<string, float> beacons) : base(profile, true)
         {
-            Attributes = new TanksTicketAttributes();
+            Attributes = new TanksTicketAttributes { Beacons = beacons };
         }
     }
 }
