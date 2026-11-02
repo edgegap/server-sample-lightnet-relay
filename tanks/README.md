@@ -23,6 +23,8 @@ Host and players must use the same netcode.
 
 Command line: `-netcode NAME -relay ADDRESS -relayPort PORT [-relayUdpPort UDP]`, then `-host [-codeFile PATH]` or `-join CODE`. On Edgegap, pass the deployment's host and external port: `-relay <host>.pr.edgegap.net -relayPort <port>`.
 
+Optional Edgegap matchmaking (off by default): turn on `useMatchmaker` in `TanksSettings.asset` and fill in the matchmaker URL and token, and the HUD gets a **Find Match** button; the matchmaker starts a relay for the match and one matched player hosts it. Command line: `-matchmaker URL -matchmakerToken TOKEN [-findMatch]`. Setup is in the [main README](../README.md#optional-edgegap-matchmaker).
+
 ## Layout
 
 ```

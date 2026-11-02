@@ -17,6 +17,8 @@ namespace Tanks
     /// -relay ADDRESS -relayPort PORT [-relayUdpPort UDP]   relay to use
     /// -host [-codeFile PATH]                              host a room, write its code to PATH
     /// -join CODE                                          join a room
+    /// -matchmaker URL -matchmakerToken TOKEN              use the Edgegap matchmaker (TanksSettings.useMatchmaker)
+    /// -findMatch                                          find a match through the matchmaker at start
     /// -e2e [-expectTanks N] [-timeout S]                  test: drive, fire, pass when N tanks sync through the relay
     /// -switchFrom NETCODE                                 test: start on NETCODE, then switch to -netcode at runtime
     /// </code>
@@ -25,6 +27,8 @@ namespace Tanks
     {
         ITanksSession session;
         TanksSettings settings;
+        TanksMatchmaker matchmaker;
+        bool findMatchPending;
         string joinCode = "";
         bool autoStarted;
         Netcode? switchFrom;
@@ -58,6 +62,7 @@ namespace Tanks
             if (float.TryParse(Args.Value("-timeout"), out float t)) timeout = t;
             joinCode = Args.Value("-join") ?? "";
             TankCore.AutoDrive = TankCore.AutoFire = e2e && Args.Value("-join") != null;
+            findMatchPending = Args.Flag("-findMatch");
             if (Enum.TryParse(Args.Value("-switchFrom"), true, out Netcode from) && from != settings.netcode) switchFrom = from;
             if (Application.isBatchMode) Application.targetFrameRate = 60;
         }
@@ -66,10 +71,15 @@ namespace Tanks
         {
             started = Time.realtimeSinceStartup;
             SceneManager.sceneLoaded += (_, _) => session = null;
+            if (settings.useMatchmaker)
+            {
+                matchmaker = new TanksMatchmaker(this, settings) { OnMatched = StartMatch };
+            }
         }
 
         void Update()
         {
+            matchmaker?.Poll();
             if (session == null)
             {
                 session = TanksSessions.Find();
@@ -97,12 +107,18 @@ namespace Tanks
                 if (Args.Flag("-host")) Host();
                 else if (Args.Value("-join") != null) Join();
             }
+            if (findMatchPending && matchmaker != null && matchmaker.IsHealthy && !session.IsActive)
+            {
+                findMatchPending = false;
+                matchmaker.FindMatch();
+            }
 
             if (e2e) UpdateTest();
         }
 
         void Host()
         {
+            settings.hostRoomCode = null;
             string codeFile = Args.Value("-codeFile");
             session.StartHost(settings, code =>
             {
@@ -112,6 +128,23 @@ namespace Tanks
         }
 
         void Join() => session.StartClient(settings, joinCode.Trim().ToUpperInvariant());
+
+        /// <summary>The matchmaker found a match: the relay address is in the settings, the relay picked our role.</summary>
+        void StartMatch(bool isHost, string code)
+        {
+            if (session == null || session.IsActive) return;
+            if (isHost)
+            {
+                settings.hostRoomCode = code;
+                session.StartHost(settings, c => Debug.Log($"Tanks: hosting match room {c}"));
+            }
+            else
+            {
+                joinCode = code;
+                TankCore.AutoDrive = TankCore.AutoFire = e2e;
+                session.StartClient(settings, code);
+            }
+        }
 
         void SwitchTo(Netcode netcode)
         {
@@ -151,6 +184,22 @@ namespace Tanks
                     settings.relayUdpPort = port;
                 }
                 GUILayout.EndHorizontal();
+
+                if (matchmaker != null)
+                {
+                    GUILayout.Label("Edgegap matchmaker: " + matchmaker.Status);
+                    if (matchmaker.IsBusy)
+                    {
+                        if (GUILayout.Button("Cancel")) matchmaker.Cancel();
+                    }
+                    else
+                    {
+                        GUI.enabled = matchmaker.IsHealthy;
+                        if (GUILayout.Button("Find Match")) matchmaker.FindMatch();
+                        GUI.enabled = true;
+                    }
+                    GUILayout.Label("Or host / join a room by code:");
+                }
 
                 if (GUILayout.Button("Host (creates a room)")) Host();
 

@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.edgegap.unity-sdk": "https://github.com/edgegap/sdk-unity-sessions-matchmaker-server-browser.git",
     "com.edgegap.unity-servers-plugin": "https://github.com/edgegap/edgegap-unity-plugin.git#sample/unity-mirror-tank",
     "com.lightnet.relay": "file:../../LightNet",
     "com.unity.ai.navigation": "2.0.8",

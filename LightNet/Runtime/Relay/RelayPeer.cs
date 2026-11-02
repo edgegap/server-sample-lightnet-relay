@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 
 namespace LightNet.Relay
 {
@@ -22,7 +23,10 @@ namespace LightNet.Relay
         public Action OnJoined;
         public Action<ArraySegment<byte>, ENetChannel> OnHostData;
 
-        // both. Fired once, when the relay connection ends or could not be made (reason for logs).
+        // match role request: isHost and the match room code. The connection closes right after.
+        public Action<bool, string> OnMatchAssigned;
+
+        // all. Fired once, when the relay connection ends or could not be made (reason for logs).
         public Action<string> OnDisconnected;
 
         public bool IsHost { get; private set; }
@@ -36,18 +40,35 @@ namespace LightNet.Relay
         NetworkService service;
         ConnectionHandle relay;
         string joinCode;
+        string hostCode;
+        string matchTicket;
         bool connected;
 
-        public void Host(string relayAddress, int tcpPort, int udpPort)
+        /// <summary>Create a room. <paramref name="code"/>: the match room code from <see cref="RequestMatchRole"/>, null otherwise.</summary>
+        public void Host(string relayAddress, int tcpPort, int udpPort, string code = null)
         {
             IsHost = true;
+            matchTicket = null;
+            hostCode = string.IsNullOrEmpty(code) ? null : code.Trim().ToUpperInvariant();
             Start(relayAddress, tcpPort, udpPort);
         }
 
         public void Join(string relayAddress, int tcpPort, int udpPort, string code)
         {
             IsHost = false;
+            matchTicket = null;
             joinCode = (code ?? "").Trim().ToUpperInvariant();
+            Start(relayAddress, tcpPort, udpPort);
+        }
+
+        /// <summary>
+        /// Relay started by the Edgegap matchmaker: ask whether this player hosts the match or joins it.
+        /// <see cref="OnMatchAssigned"/> gets the answer, then this connection closes; host or join with the code.
+        /// </summary>
+        public void RequestMatchRole(string relayAddress, int tcpPort, int udpPort, string ticketId)
+        {
+            IsHost = false;
+            matchTicket = ticketId ?? "";
             Start(relayAddress, tcpPort, udpPort);
         }
 
@@ -95,8 +116,10 @@ namespace LightNet.Relay
                 {
                     connected = true;
                     relay = ev.Connection;
-                    service.SendMessage(relay, ENetChannel.Reliable,
-                        IsHost ? RelayProtocol.Make(RelayMsg.CreateRoom) : RelayProtocol.Make(RelayMsg.JoinRoom, joinCode));
+                    byte[] hello = matchTicket != null ? RelayProtocol.Make(RelayMsg.MatchRole, matchTicket)
+                        : IsHost ? (hostCode != null ? RelayProtocol.Make(RelayMsg.CreateRoom, hostCode) : RelayProtocol.Make(RelayMsg.CreateRoom))
+                        : RelayProtocol.Make(RelayMsg.JoinRoom, joinCode);
+                    service.SendMessage(relay, ENetChannel.Reliable, hello);
                 }
                 else if (ev.EventType == ConnectionEvent.EType.Disconnected)
                 {
@@ -129,6 +152,19 @@ namespace LightNet.Relay
                     RoomCode = joinCode;
                     IsReady = true;
                     OnJoined?.Invoke();
+                    break;
+                case RelayMsg.MatchAssigned:
+                    if (matchTicket != null && msg.Length > 1)
+                    {
+                        bool isHost = msg[1] == 1;
+                        string code = Encoding.ASCII.GetString(msg, 2, msg.Length - 2);
+                        // done with this connection: close it without OnDisconnected
+                        NetworkService s = service;
+                        service = null;
+                        connected = false;
+                        if (s.GetState() != ENetworkState.Closed) s.Close();
+                        OnMatchAssigned?.Invoke(isHost, code);
+                    }
                     break;
                 case RelayMsg.JoinFailed:
                     CloseWith("join failed: " + RelayProtocol.ReadText(msg));
