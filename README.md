@@ -57,6 +57,22 @@ The four relay transports all wrap `RelayPeer`. On the host, the netcode's own c
 - The relay is not a game server: the hosting player's game runs the netcode's server, and the relay only forwards bytes between the host and each client. The relay doesn't know or care which netcode is used.
 - When the host leaves, the room closes and the relay disconnects its clients.
 - Limits per message: 1,177 bytes unreliable, 16 KB reliable. The transports report these as their MTU.
+- Players can also reach the relay over one WebSocket instead of TCP + UDP (below); both kinds of players can share a room.
+
+## Security
+
+**Game traffic through the relay is not encrypted by default.** It goes over LightNet's plain TCP and UDP, so anyone on the network path can read it. Calls to the Edgegap matchmaker are HTTPS.
+
+What protects players today:
+
+- Nobody sees another player's IP address: everyone connects out to the relay.
+- With room codes, anyone with the relay address and a valid code can join. With the [matchmaker](#optional-edgegap-matchmaker), the relay only gives the room code to the matched players' tickets.
+
+**For encryption, use the WebSocket option.** On Edgegap, a `WS` port with **TLS Upgrade** makes it `wss://`: Edgegap holds the certificate and terminates TLS, so traffic between each player and Edgegap is encrypted and the relay needs no certificate. It is not end to end: the relay, and so its operator, still sees the bytes it forwards, and the host's game sees everything, as with any relay.
+
+The trade-off: WebSocket runs over TCP only, so "unreliable" messages are sent reliably and in order. On a lossy connection that adds delay, which is fine for co-op and turn-based games, less so for fast shooters. So it is an option next to TCP + UDP, not a replacement, and a host on TCP + UDP and a client on WebSocket can play in the same room.
+
+Use it by giving the game a `ws://` or `wss://` relay address instead of a host name (`TanksSettings.asset`, the HUD, or `-relay wss://<host>.pr.edgegap.net:<external port>`); with the matchmaker, turn on `matchmakerUseWebSocket` (`-matchmakerWebSocket`). It works on desktop and mobile builds (.NET `ClientWebSocket`); a WebGL build would also need a browser WebSocket bridge, which the sample doesn't have yet.
 
 ## Run it
 
@@ -64,7 +80,7 @@ Requirements: Docker, Unity 6000.0.54f1, .NET 8 SDK (only to build the relay out
 
 ```bash
 docker build --platform linux/amd64 -f relay-server/Dockerfile -t lightnet-relay:dev .
-docker run --rm -p 7777:7777/tcp -p 7777:7777/udp lightnet-relay:dev
+docker run --rm -p 7777:7777/tcp -p 7777:7777/udp -p 7778:7778/tcp lightnet-relay:dev
 ```
 
 Open `tanks/` in Unity, pick a netcode (above) and press Play on `Assets/Tanks/Scenes/Boot.unity` (or open a `Tanks_<Netcode>` scene directly), or build with **Tanks > Build Windows client**. In the first game press **Host**: the room code appears in the HUD. In the second, type the code and press **Join room**.
@@ -74,13 +90,15 @@ Automated test: it runs on Windows (from Git Bash) and needs the Windows client 
 ```bash
 ./e2e.sh 127.0.0.1 7777
 ./e2e.sh 127.0.0.1 7777 FishNet NGO
+./e2e.sh ws://127.0.0.1:7778 0                               # both games over WebSocket
+CLIENT_RELAY=ws://127.0.0.1:7778 ./e2e.sh 127.0.0.1 7777     # host on TCP + UDP, client on WebSocket
 ```
 
 For each netcode it starts a host and a client. The client drives in circles and fires every second. It passes when both games see two tanks, both received reliable and unreliable data through the relay, both saw a projectile spawn, and the host saw the client's tank move.
 
-Relay settings (environment variables): `RELAY_TCP_PORT` and `RELAY_UDP_PORT` (default 7777), `RELAY_MAX_PEERS` (default 256), `RELAY_IDLE_EXIT_SECONDS` (exit when no room exists for that long, default 600, so an idle deployment on Edgegap stops; 0 = never).
+Relay settings (environment variables): `RELAY_TCP_PORT` and `RELAY_UDP_PORT` (default 7777), `RELAY_WS_PORT` (WebSocket, default 7778, 0 = off; other HTTP requests on it get `200 ok` for health checks), `RELAY_MAX_PEERS` (default 256), `RELAY_IDLE_EXIT_SECONDS` (exit when no room exists for that long, default 600, so an idle deployment on Edgegap stops; 0 = never).
 
-Game command line: `-netcode NAME -relay ADDRESS -relayPort PORT [-relayUdpPort UDP]`, then `-host [-codeFile PATH]` or `-join CODE`; for tests, `-e2e -expectTanks N -timeout S` and `-switchFrom NAME` (start on another netcode and switch at runtime).
+Game command line: `-netcode NAME -relay ADDRESS -relayPort PORT [-relayUdpPort UDP]` (or `-relay ws://HOST:PORT` / `wss://HOST:PORT`), then `-host [-codeFile PATH]` or `-join CODE`; for tests, `-e2e -expectTanks N -timeout S` and `-switchFrom NAME` (start on another netcode and switch at runtime).
 
 ## Optional: Edgegap matchmaker
 
@@ -108,6 +126,7 @@ Automated test: two clients press Find Match and play one match through the rela
 ```bash
 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token>
 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token> FishNet NGO
+MM_WEBSOCKET=1 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token>   # over wss:// (relay-ws port)
 ```
 
 Tested on Edgegap on 2026-11-02 (matchmaker 3.3.2, free tier): passed on Mirror, FishNet, PurrNet and NGO, one relay deployment per match in Newark, each stopped by the relay itself (`TERMINATED`) when the host left.
@@ -133,6 +152,8 @@ Upstream LightNet assumed a server that can reach its clients directly. To run a
 ## On Edgegap
 
 The app version needs one port: 7777 with protocol `TCP/UDP` (two separate 7777 TCP and 7777 UDP entries are rejected as duplicates). Edgegap maps both protocols to the same external port, so clients pass it once: `-relay <host>.pr.edgegap.net -relayPort <external port>`. Edgegap's readiness check opens a TCP connection at start, which shows in the relay log as a peer that connects and leaves.
+
+For the [WebSocket option](#security), add a second port: 7778, protocol `WS`, **TLS Upgrade** on, named `relay-ws`. Players connect to `wss://<host>.pr.edgegap.net:<its external port>`, by host name (the certificate is for `*.pr.edgegap.net`, not the IP).
 
 Tested on Edgegap on 2026-10-29: `./e2e.sh <host>.pr.edgegap.net <port>` through a relay deployed in Newark passed on Mirror, FishNet, PurrNet and NGO. One deployment serves many rooms; a lobby or matchmaker can also deploy one relay per match near the players.
 

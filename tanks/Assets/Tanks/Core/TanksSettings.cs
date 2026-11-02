@@ -26,7 +26,7 @@ namespace Tanks
         [Tooltip("Netcode the game runs on. Every netcode has its own scene: Tanks_<Netcode>.")]
         public Netcode netcode = Netcode.Mirror;
 
-        [Tooltip("LightNet relay address (host name or IP).")]
+        [Tooltip("LightNet relay address: a host name or IP for TCP + UDP, or a ws:// or wss:// URL (with its port) for WebSocket.")]
         public string relayAddress = "localhost";
         [Tooltip("Relay TCP port (reliable channel).")]
         public int relayTcpPort = 7777;
@@ -44,9 +44,16 @@ namespace Tanks
         public string matchmakerProfile = "casual";
         [Tooltip("Port name on the relay's Edgegap app version.")]
         public string matchmakerPortName = "relay";
+        [Tooltip("Connect to the match relay over encrypted WebSocket (wss://) instead of TCP + UDP. Needs a WS port with TLS Upgrade on the app version.")]
+        public bool matchmakerUseWebSocket = false;
+        [Tooltip("Name of that WS port on the relay's Edgegap app version.")]
+        public string matchmakerWebSocketPortName = "relay-ws";
 
         /// <summary>Room code the host must create: set for a matchmade match, null when the relay picks one.</summary>
         [NonSerialized] public string hostRoomCode;
+
+        /// <summary>The relay as players see it: address:port, or the ws:// / wss:// URL.</summary>
+        public string RelayLabel => LightNet.Relay.RelayWebSocket.IsWebSocketAddress(relayAddress) ? relayAddress : $"{relayAddress}:{relayTcpPort}";
 
         public string SceneName => SceneFor(netcode);
         public static string SceneFor(Netcode n) => "Tanks_" + n;
@@ -79,6 +86,7 @@ namespace Tanks
                 }
                 string mmToken = Args.Value("-matchmakerToken");
                 if (!string.IsNullOrEmpty(mmToken)) current.matchmakerToken = mmToken;
+                if (Args.Flag("-matchmakerWebSocket")) current.matchmakerUseWebSocket = true;
                 string mmProfile = Args.Value("-matchmakerProfile");
                 if (!string.IsNullOrEmpty(mmProfile)) current.matchmakerProfile = mmProfile;
                 return current;

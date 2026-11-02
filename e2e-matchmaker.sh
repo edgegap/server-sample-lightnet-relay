@@ -4,6 +4,7 @@
 # Usage: ./e2e-matchmaker.sh MATCHMAKER_URL MATCHMAKER_TOKEN [netcode...]     netcode: Mirror FishNet PurrNet NGO (default: all)
 # Runs on Windows (Git Bash). Expects tanks/Builds/Windows/Tanks.exe (Tanks > Build Windows client) and a matchmaker
 # created from matchmaker-config.json (see README). Free tier: one deployment at a time, so netcodes run one after another.
+# MM_WEBSOCKET=1 connects both games to the match relay over wss:// (the app version's relay-ws port) instead of TCP/UDP.
 set -u
 cd "$(dirname "$0")"
 if [ $# -lt 2 ]; then echo "usage: $0 MATCHMAKER_URL MATCHMAKER_TOKEN [netcode...]"; exit 2; fi
@@ -20,6 +21,7 @@ for NC in $NETCODES; do
   rm -rf "$OUT" && mkdir -p "$OUT"
   echo "== $NC"
   COMMON="-batchmode -nographics -netcode $NC -matchmaker $URL -matchmakerToken $TOKEN -findMatch -e2e -expectTanks 2 -timeout 180"
+  [ "${MM_WEBSOCKET:-0}" = 1 ] && COMMON="$COMMON -matchmakerWebSocket"
   "$EXE" $COMMON -logFile "$OUT/a.log" &
   A=$!
   "$EXE" $COMMON -logFile "$OUT/b.log" &
