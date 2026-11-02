@@ -8,6 +8,7 @@ A small network relay built on [LightNet](https://github.com/edgegap/server-samp
 | `relay-server/` | The relay: a .NET 8 console app built from the same LightNet sources, and its Dockerfile. |
 | `tanks/` | Unity 6 project (6000.0.54f1) from [edgegap/netcode-game-sample-unity-mirror-tanks](https://github.com/edgegap/netcode-game-sample-unity-mirror-tanks) with `Assets/Tanks/`: the game on all four netcodes. |
 | `e2e.sh` | Automated test: two Tanks clients through the relay, on each netcode. |
+| `matchmaker-config.json`, `e2e-matchmaker.sh` | Optional [Edgegap matchmaker](#optional-edgegap-matchmaker) config, and its automated test. |
 
 ## Pick the netcode
 
@@ -80,6 +81,34 @@ For each netcode it starts a host and a client. The client drives in circles and
 Relay settings (environment variables): `RELAY_TCP_PORT` and `RELAY_UDP_PORT` (default 7777), `RELAY_MAX_PEERS` (default 256), `RELAY_IDLE_EXIT_SECONDS` (exit when no room exists for that long, default 600, so an idle deployment on Edgegap stops; 0 = never).
 
 Game command line: `-netcode NAME -relay ADDRESS -relayPort PORT [-relayUdpPort UDP]`, then `-host [-codeFile PATH]` or `-join CODE`; for tests, `-e2e -expectTanks N -timeout S` and `-switchFrom NAME` (start on another netcode and switch at runtime).
+
+## Optional: Edgegap matchmaker
+
+Off by default. With it on, players press **Find Match** instead of passing room codes around: the [Edgegap matchmaker](https://docs.edgegap.com/learn/matchmaking) groups 2 to 4 players and starts a relay on Edgegap for their match, near them. Each player then asks that relay for its role with its matchmaking ticket ID: the first one hosts the match room, the others join it, and each netcode starts exactly as with a hand-made room. Hosting and joining by code still work next to it.
+
+```
+ Find Match ──ticket──► Edgegap matchmaker ──match──► deploys a relay (MM_TICKET_IDS = the matched tickets)
+ ◄──── HOST_ASSIGNED: relay IP + port ────┘
+ MatchRole(ticket) ──► relay: first ticket → host + room code, others → join + room code (unknown tickets refused)
+ host: CreateRoom(code) / others: JoinRoom(code), held until the host's room exists
+```
+
+The relay switches to match mode by itself when it finds `MM_TICKET_IDS`, which only the matchmaker injects. In match mode it hosts only that match's room, exits when the host leaves (or after `RELAY_IDLE_EXIT_SECONDS`, default 60, if nobody created the room), and stops its own Edgegap deployment (`ARBITRIUM_DELETE_URL`) so an ended match costs nothing. Any other relay works as before.
+
+Set it up:
+
+1. Push the relay image and create an app version as in [On Edgegap](#on-edgegap), with the port named `relay`.
+2. In the Edgegap dashboard, **Matchmaker > Create Matchmaker**: upload [`matchmaker-config.json`](matchmaker-config.json) (profile `casual`, 2 to 4 players, 30 s ticket expiration) after setting `application.name` and `version` to your app version, then **Create and Start**.
+3. In `tanks/Assets/Tanks/Resources/TanksSettings.asset`, turn on `useMatchmaker` and paste the matchmaker's **API URL** and **Auth Token** (the token is safe to ship in a game: it gives no access to the Edgegap account). Or, on the command line: `-matchmaker URL -matchmakerToken TOKEN`, and `-findMatch` to search at start.
+
+The client uses the [Edgegap Unity SDK](https://github.com/edgegap/sdk-unity-sessions-matchmaker-server-browser) (`com.edgegap.unity-sdk`); the code is in `Assets/Tanks/Core/TanksMatchmaker.cs`.
+
+Automated test: two clients press Find Match and play one match through the relay the matchmaker started, on each netcode in turn (Windows, Git Bash, Windows client build needed as above):
+
+```bash
+./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token>
+./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token> FishNet NGO
+```
 
 ## Changes to LightNet
 

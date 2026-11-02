@@ -1,0 +1,28 @@
+{
+  "version": "3.3.2",
+  "inspect": true,
+  "max_deployment_retry_count": 3,
+  "profiles": {
+    "casual": {
+      "ticket_expiration_period": "30s",
+      "ticket_removal_period": "1m",
+      "group_inactivity_removal_period": "5m",
+      "application": {
+        "name": "lightnet-relay",
+        "version": "20261102-1428"
+      },
+      "rules": {
+        "initial": {
+          "match_size": {
+            "type": "player_count",
+            "attributes": {
+              "team_count": 1,
+              "min_team_size": 2,
+              "max_team_size": 4
+            }
+          }
+        }
+      }
+    }
+  }
+}

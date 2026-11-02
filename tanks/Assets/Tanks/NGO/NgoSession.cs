@@ -43,6 +43,7 @@ namespace Tanks.NgoRelay
             transport.relayAddress = relay.relayAddress;
             transport.relayTcpPort = relay.relayTcpPort;
             transport.relayUdpPort = relay.relayUdpPort;
+            transport.hostRoomCode = relay.hostRoomCode;
         }
     }
 }

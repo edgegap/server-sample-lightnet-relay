@@ -1,5 +1,14 @@
 {
   "dependencies": {
+    "com.edgegap.unity-sdk": {
+      "version": "https://github.com/edgegap/sdk-unity-sessions-matchmaker-server-browser.git",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {
+        "com.unity.nuget.newtonsoft-json": "3.2.2"
+      },
+      "hash": "abfe3e108edd7067981b9baee9df4005545024f6"
+    },
     "com.edgegap.unity-servers-plugin": {
       "version": "https://github.com/edgegap/edgegap-unity-plugin.git#sample/unity-mirror-tank",
       "depth": 0,
@@ -106,7 +115,7 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.nuget.newtonsoft-json": {
-      "version": "3.2.1",
+      "version": "3.2.2",
       "depth": 1,
       "source": "registry",
       "dependencies": {},

@@ -33,6 +33,21 @@ namespace Tanks
         [Tooltip("Relay UDP port (unreliable channel). On Edgegap it is the same external port as TCP.")]
         public int relayUdpPort = 7777;
 
+        [Header("Edgegap matchmaker (optional)")]
+        [Tooltip("Off: players host and join rooms with a code on the relay above. On: Find Match asks the Edgegap matchmaker, which starts a relay for the match; one matched player hosts it, the others join automatically.")]
+        public bool useMatchmaker = false;
+        [Tooltip("Matchmaker API URL from the Edgegap dashboard, e.g. https://om-xxxxxxxxxx.edgegap.net")]
+        public string matchmakerUrl = "";
+        [Tooltip("Matchmaker Auth Token from the Edgegap dashboard. Safe to ship in clients: it gives no access to the Edgegap account.")]
+        public string matchmakerToken = "";
+        [Tooltip("Profile name in the matchmaker config (matchmaker-config.json).")]
+        public string matchmakerProfile = "casual";
+        [Tooltip("Port name on the relay's Edgegap app version.")]
+        public string matchmakerPortName = "relay";
+
+        /// <summary>Room code the host must create: set for a matchmade match, null when the relay picks one.</summary>
+        [NonSerialized] public string hostRoomCode;
+
         public string SceneName => SceneFor(netcode);
         public static string SceneFor(Netcode n) => "Tanks_" + n;
 
@@ -56,6 +71,16 @@ namespace Tanks
                     current.relayUdpPort = tcp;
                 }
                 if (int.TryParse(Args.Value("-relayUdpPort"), out int udp)) current.relayUdpPort = udp;
+                string mmUrl = Args.Value("-matchmaker");
+                if (!string.IsNullOrEmpty(mmUrl))
+                {
+                    current.useMatchmaker = true;
+                    current.matchmakerUrl = mmUrl;
+                }
+                string mmToken = Args.Value("-matchmakerToken");
+                if (!string.IsNullOrEmpty(mmToken)) current.matchmakerToken = mmToken;
+                string mmProfile = Args.Value("-matchmakerProfile");
+                if (!string.IsNullOrEmpty(mmProfile)) current.matchmakerProfile = mmProfile;
                 return current;
             }
         }

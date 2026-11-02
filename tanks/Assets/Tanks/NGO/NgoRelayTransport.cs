@@ -19,6 +19,8 @@ namespace Tanks.NgoRelay
         public int relayTcpPort = RelayProtocol.DefaultPort;
         public int relayUdpPort = RelayProtocol.DefaultPort;
         public string roomCode = "";
+        /// <summary>Room code to create when hosting a matchmade match (from the relay), null otherwise.</summary>
+        [System.NonSerialized] public string hostRoomCode;
 
         public string RoomCode => host?.RoomCode;
         public Action<string> OnRoomCreated;
@@ -58,7 +60,7 @@ namespace Tanks.NgoRelay
                 events.Enqueue((NetworkEvent.TransportFailure, ServerClientId, default));
             };
             Debug.Log($"LightNet relay (NGO): creating a room on {relayAddress}:{relayTcpPort}/{relayUdpPort}");
-            host.Host(relayAddress, relayTcpPort, relayUdpPort);
+            host.Host(relayAddress, relayTcpPort, relayUdpPort, hostRoomCode);
             return true;
         }
 
