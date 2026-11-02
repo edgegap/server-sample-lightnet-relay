@@ -36,6 +36,10 @@ namespace LightNet.Relay
         public bool IsActive => service != null || ws != null;
         public string RoomCode { get; private set; }
 
+        /// <summary>Why the last relay connection in this process ended (for games and tests), e.g. <see cref="NoPlayersJoined"/>.</summary>
+        public static string LastDisconnectReason;
+        public const string NoPlayersJoined = "no players joined";
+
         /// <summary>Payload bytes received from other players, per channel, by every peer in this process (for tests).</summary>
         public static long TotalReceivedReliable, TotalReceivedUnreliable;
 
@@ -209,6 +213,9 @@ namespace LightNet.Relay
                 case RelayMsg.RoomClosed:
                     CloseWith("the host left");
                     break;
+                case RelayMsg.RoomTimedOut:
+                    CloseWith(NoPlayersJoined);
+                    break;
                 case RelayMsg.PeerJoined:
                     OnPeerJoined?.Invoke(RelayProtocol.ReadPeerId(msg));
                     break;
@@ -250,6 +257,7 @@ namespace LightNet.Relay
         void Ended(string reason)
         {
             bool wasStarted = connected || IsReady || reason != "closed";
+            if (wasStarted) LastDisconnectReason = reason;
             IsReady = false;
             connected = false;
             RoomCode = null;

@@ -9,7 +9,7 @@
       "group_inactivity_removal_period": "5m",
       "application": {
         "name": "lightnet-relay",
-        "version": "20261102-1647"
+        "version": "20261102-1815"
       },
       "rules": {
         "initial": {
@@ -19,6 +19,13 @@
               "team_count": 1,
               "min_team_size": 9999,
               "max_team_size": 9999
+            }
+          },
+          "beacons": {
+            "type": "latencies",
+            "attributes": {
+              "difference": 100,
+              "max_latency": 150
             }
           }
         },

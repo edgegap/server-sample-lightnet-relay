@@ -19,7 +19,9 @@ namespace Tanks
     /// -join CODE                                          join a room
     /// -matchmaker URL -matchmakerToken TOKEN              use the Edgegap matchmaker (TanksSettings.useMatchmaker)
     /// -findMatch                                          find a match through the matchmaker at start
+    /// -matchmakerWebSocket  -noBeacons  -beacons City=ms,City=ms   wss:// to the match relay / no latency / fixed pings (tests)
     /// -e2e [-expectTanks N] [-timeout S]                  test: drive, fire, pass when N tanks sync through the relay
+    ///      [-holdAfterPass S]                             the host keeps its room S seconds after passing (default 3)
     /// -switchFrom NETCODE                                 test: start on NETCODE, then switch to -netcode at runtime
     /// </code>
     /// </summary>
@@ -37,6 +39,7 @@ namespace Tanks
         bool e2e;
         int expectTanks = 2;
         float timeout = 90;
+        float holdAfterPass = 3;
         float started;
         bool wasActive;
         bool passed;
@@ -60,6 +63,7 @@ namespace Tanks
             e2e = Args.Flag("-e2e");
             if (int.TryParse(Args.Value("-expectTanks"), out int n)) expectTanks = n;
             if (float.TryParse(Args.Value("-timeout"), out float t)) timeout = t;
+            if (float.TryParse(Args.Value("-holdAfterPass"), out float hold)) holdAfterPass = hold;
             joinCode = Args.Value("-join") ?? "";
             TankCore.AutoDrive = TankCore.AutoFire = e2e && Args.Value("-join") != null;
             findMatchPending = Args.Flag("-findMatch");
@@ -107,6 +111,15 @@ namespace Tanks
                 if (Args.Flag("-host")) Host();
                 else if (Args.Value("-join") != null) Join();
             }
+            // nobody joined our matchmade room in time: the relay closed it, so stop hosting and look for another match
+            if (RelayPeer.LastDisconnectReason == RelayPeer.NoPlayersJoined && matchmaker != null)
+            {
+                Debug.Log("Tanks: nobody joined the room in time, finding another match");
+                RelayPeer.LastDisconnectReason = null;
+                if (session.IsActive) session.Stop();
+                findMatchPending = true;
+            }
+
             if (findMatchPending && matchmaker != null && matchmaker.IsHealthy && !session.IsActive)
             {
                 findMatchPending = false;
@@ -232,7 +245,7 @@ namespace Tanks
             {
                 // The host stays a few seconds so the client sees everything, then closes the room.
                 // The client keeps driving until the host is gone, so the host can see it move.
-                bool done = session.IsServer ? Time.realtimeSinceStartup - passedAt > 3 : !session.IsActive || Time.realtimeSinceStartup - passedAt > timeout;
+                bool done = session.IsServer ? Time.realtimeSinceStartup - passedAt > holdAfterPass : !session.IsActive || Time.realtimeSinceStartup - passedAt > timeout;
                 if (done) Quit(0);
                 return;
             }

@@ -66,7 +66,7 @@ The four relay transports all wrap `RelayPeer`. On the host, the netcode's own c
 What protects players today:
 
 - Nobody sees another player's IP address: everyone connects out to the relay.
-- With room codes, anyone with the relay address and a valid code can join. With the [matchmaker](#optional-edgegap-matchmaker), the relay only gives the room code to the matched players' tickets.
+- With room codes, anyone with the relay address and a valid code can join. With the [matchmaker](#optional-edgegap-matchmaker), the relay only gives each room's code to that room's tickets.
 
 **For encryption, use the WebSocket option.** On Edgegap, a `WS` port with **TLS Upgrade** makes it `wss://`: Edgegap holds the certificate and terminates TLS, so traffic between each player and Edgegap is encrypted and the relay needs no certificate. It is not end to end: the relay, and so its operator, still sees the bytes it forwards, and the host's game sees everything, as with any relay.
 
@@ -102,48 +102,63 @@ Game command line: `-netcode NAME -relay ADDRESS -relayPort PORT [-relayUdpPort 
 
 ## Optional: Edgegap matchmaker
 
-Off by default. With it on, players press **Find Match** instead of passing room codes around: the [Edgegap matchmaker](https://docs.edgegap.com/learn/matchmaking) groups 2 to 4 players and starts a relay on Edgegap for their match, near them. Each player then asks that relay for its role with its matchmaking ticket ID: the first one hosts the match room, the others join it, and each netcode starts exactly as with a hand-made room. Hosting and joining by code still work next to it.
+Off by default. With it on, players press **Find Match** instead of passing room codes around: the [Edgegap matchmaker](https://docs.edgegap.com/learn/matchmaking) groups 2 to 4 players near each other and starts a relay on Edgegap for their match, near them. Each player then asks that relay for its role with its matchmaking ticket ID: the first one hosts the match room, the others join it, and each netcode starts exactly as with a hand-made room. Players who search later join running rooms, and a relay with full rooms opens new ones before the matchmaker starts another relay. Hosting and joining by code still work next to it.
 
 ```
- Find Match ──ticket──► Edgegap matchmaker ──match──► deploys a relay (MM_TICKET_IDS = the matched tickets)
+ Find Match ──ticket (+ pings)──► Edgegap matchmaker ──match──► deploys a relay (MM_TICKET_IDS = the matched tickets)
  ◄──── HOST_ASSIGNED: relay IP + port ────┘
- MatchRole(ticket) ──► relay: first ticket → host + room code, others → join + room code (unknown tickets refused)
+ MatchRole(ticket) ──► relay: the room's first ticket → host + room code, others → join + room code (unknown tickets refused)
  host: CreateRoom(code) / others: JoinRoom(code), held until the host's room exists
 ```
 
-The relay switches to match mode by itself when it finds `MM_TICKET_IDS`, which only the matchmaker injects. In match mode it hosts only that match's room, exits when the host leaves (or after `RELAY_IDLE_EXIT_SECONDS`, default 60, if nobody created the room), and stops its own Edgegap deployment (`ARBITRIUM_DELETE_URL`) so an ended match costs nothing. Any other relay works as before.
+The relay switches to match mode by itself when it finds `MM_TICKET_IDS`, which only the matchmaker injects. In match mode every room on it is a match room that only its own tickets can enter. Any other relay works as before.
 
-### Join a running match (backfill)
+### One relay, several rooms (backfill)
 
-Once a match runs, the relay fills its free seats through the matchmaker, so players who press **Find Match** later join a running match instead of waiting for a new one, with no room code. While the match has fewer than `RELAY_MATCH_MAX_PLAYERS` (default 4) players in the room or on their way, the relay keeps up to two [backfills](https://docs.edgegap.com/learn/matchmaking/matchmaker-in-depth) open: tickets owned by the relay that carry its own address. When the matchmaker puts a player in one, that player gets `HOST_ASSIGNED` with this relay, asks for its role like the others and joins as a client. A seat freed by a leaving player opens a new backfill, and the relay deletes its backfills before it stops. The game needs nothing extra: the same Find Match flow.
+A match relay keeps working for the matchmaker after its first match starts, through [backfills](https://docs.edgegap.com/learn/matchmaking/matchmaker-in-depth): tickets owned by the relay that carry its own address. When the matchmaker puts a player in one, that player gets `HOST_ASSIGNED` with this relay and asks for its role like the others. The game needs nothing extra: the same Find Match flow.
+
+- **Rooms with free seats come first.** A room with fewer than `RELAY_MATCH_MAX_PLAYERS` (default 4) players, in the room or on their way, keeps up to 3 backfills open; a player placed there joins that room.
+- **Then new rooms.** When every room is full and the relay has fewer than `RELAY_MAX_ROOMS` (default 4) rooms, it offers one new room. The player placed there hosts it, and the room then fills like the others. The relay only offers a new room once the others are full, so two players searching at the same time end up together instead of alone in two rooms.
+- **Near players only.** Backfills carry the room's own players' tickets, with their pings, so the matchmaker checks a new player against them with the profile's latency rule.
+- **A host left alone** for `RELAY_SOLO_ROOM_SECONDS` (default 120) is told (`RoomTimedOut`): the game stops hosting and searches again by itself.
+- **The relay stops when its last room ends**, not when one host leaves. It deletes its backfills first, so no player is sent to a relay that is gone, and stops its own deployment (`ARBITRIUM_DELETE_URL`). A room whose host never arrives is dropped after 60 s.
+- **Rate limits.** At most 5 backfills open per relay, created at least 0.3 s apart (backfill creation is limited to 5 per second on the free tier), with a pause after an error.
 
 ```
- relay (match running, free seats) ──POST /backfills (its address + the players' tickets)──► matchmaker
- late player: Find Match ──ticket──► matchmaker puts it in the backfill ──► HOST_ASSIGNED: this relay
- relay sees the backfill ASSIGNED (polls every 2 s) → the ticket joins the match → MatchRole → joins the room
+ relay (a room has free seats, or all are full) ──POST /backfills (its address + the room's tickets)──► matchmaker
+ late player: Find Match ──ticket──► matchmaker puts it in a backfill ──► HOST_ASSIGNED: this relay
+ relay sees the backfill ASSIGNED (polls every 2 s) → seat in that room, or a new room → MatchRole → joins / hosts
 ```
 
-The profile in [`matchmaker-config.json`](matchmaker-config.json) is built for it: for its first 10 seconds a ticket can only go into a backfill (`min_team_size` 9999), so a player who searches while a match has room joins that match; after 10 seconds the usual rule applies and 2 to 4 waiting players get a new relay. Backfill needs two variables on the app version: `MATCHMAKER_URL` and `MATCHMAKER_TOKEN` (the matchmaker's API URL and Auth Token, the same client-safe values the game uses). Without them the relay logs `backfill: off` and matches never take late players. The code is in `relay-server/MatchBackfill.cs`, following the Edgegap Unity SDK's backfill flow.
+The profile in [`matchmaker-config.json`](matchmaker-config.json) is built for it:
+
+- for its first 10 seconds a ticket can only go into a backfill (`min_team_size` 9999), so a player who searches while a relay has room joins it; after 10 seconds the usual rule applies and 2 to 4 waiting players get a new relay;
+- the `beacons` rule (`latencies`: at most 150 ms to a beacon, at most 100 ms apart) keeps players, and backfills, with players near them. Each ticket carries the game's pings to Edgegap's beacons (`matchmakerLatencyBeacons` in `TanksSettings.asset`, on by default; browsers can't ping, so a WebGL build needs a profile without this rule).
+
+Backfill needs two variables on the app version: `MATCHMAKER_URL` and `MATCHMAKER_TOKEN` (the matchmaker's API URL and Auth Token, the same client-safe values the game uses). Without them the relay logs `backfill: off` and its rooms never take late players. The code is in `relay-server/MatchBackfill.cs` and `relay-server/RelayServer.cs`, following the Edgegap Unity SDK's backfill flow.
 
 Set it up:
 
 1. Push the relay image and create an app version as in [On Edgegap](#on-edgegap), with the port named `relay`.
-2. In the Edgegap dashboard, **Matchmaker > Create Matchmaker**: upload [`matchmaker-config.json`](matchmaker-config.json) (matchmaker 3.3.3, profile `casual`, 10 s for backfill first, then 2 to 4 players, 30 s ticket expiration) after setting `application.name` and `version` to your app version, then **Create and Start**.
-3. For backfill, add `MATCHMAKER_URL` and `MATCHMAKER_TOKEN` (the matchmaker's API URL and Auth Token) as environment variables on the app version.
+2. In the Edgegap dashboard, **Matchmaker > Create Matchmaker**: upload [`matchmaker-config.json`](matchmaker-config.json) (matchmaker 3.3.3, profile `casual`, 10 s for backfill first, then 2 to 4 players, latency rule, 30 s ticket expiration) after setting `application.name` and `version` to your app version, then **Create and Start**.
+3. For backfill, add `MATCHMAKER_URL` and `MATCHMAKER_TOKEN` (the matchmaker's API URL and Auth Token) as environment variables on the app version. Optional: `RELAY_MATCH_MAX_PLAYERS`, `RELAY_MAX_ROOMS`, `RELAY_SOLO_ROOM_SECONDS`.
 4. In `tanks/Assets/Tanks/Resources/TanksSettings.asset`, turn on `useMatchmaker` and paste the matchmaker's **API URL** and **Auth Token** (the token is safe to ship in a game: it gives no access to the Edgegap account). Or, on the command line: `-matchmaker URL -matchmakerToken TOKEN`, and `-findMatch` to search at start.
 
 The client uses the [Edgegap Unity SDK](https://github.com/edgegap/sdk-unity-sessions-matchmaker-server-browser) (`com.edgegap.unity-sdk`); the code is in `Assets/Tanks/Core/TanksMatchmaker.cs`.
 
-Automated test: two clients press Find Match and play one match through the relay the matchmaker started, on each netcode in turn (Windows, Git Bash, Windows client build needed as above):
+Automated test: games press Find Match and play through the relay the matchmaker started, on each netcode in turn (Windows, Git Bash, Windows client build needed as above):
 
 ```bash
 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token>
 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token> FishNet NGO
 MM_WEBSOCKET=1 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token>   # over wss:// (relay-ws port)
 BACKFILL=1 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token>       # + a late third player, by backfill
+MULTIROOM=1 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token>      # fill a room, then a 2nd room on the same relay
 ```
 
-Tested on Edgegap on 2026-11-02 (matchmaker 3.3.2, free tier): passed on Mirror, FishNet, PurrNet and NGO, one relay deployment per match in Newark, each stopped by the relay itself (`TERMINATED`) when the host left. Later the same day with backfill and the 3.3.3 config above: `BACKFILL=1` passed on all four netcodes over TCP/UDP and over `wss://` (`MM_WEBSOCKET=1`): two players started a match, a third pressed Find Match once it ran and joined it through the relay's backfill, all three saw three tanks, and each relay stopped itself.
+`MULTIROOM=1` starts the first room's players (`ROOM_SIZE`, default 4, the relay's `RELAY_MATCH_MAX_PLAYERS`), then two more games: the first must host a new room on the same relay and the second must join it. The first room stays up after the second has played, so the relay must keep running when one room ends. `EXTRA_ARGS="-beacons Tokyo=20"` gives the games fixed pings instead of measured ones.
+
+Tested on Edgegap on 2026-11-02 (matchmaker 3.3.2, free tier): passed on Mirror, FishNet, PurrNet and NGO, one relay deployment per match in Newark, each stopped by the relay itself (`TERMINATED`) when the host left. Later the same day with backfill and the 3.3.3 config above: `BACKFILL=1` passed on all four netcodes over TCP/UDP and over `wss://` (`MM_WEBSOCKET=1`): two players started a match, a third pressed Find Match once it ran and joined it through the relay's backfill, all three saw three tanks, and each relay stopped itself. With the multi-room relay and the latency rule (version `20261102-1815`, real pings from Montreal): `BACKFILL=1` passed again on all four netcodes over TCP/UDP and `wss://`, and `MULTIROOM=1` passed on all four: four players filled the first room through backfills, the next player hosted a second room on the same relay and the one after joined it, the second room ended while the first kept playing, and the relay stopped itself after the last room. A game with fake Asia-only pings was never put in the running room (its ticket expired) while a nearby player who searched next joined it.
 
 ## Changes to LightNet
 
@@ -169,7 +184,7 @@ The app version needs one port: 7777 with protocol `TCP/UDP` (two separate 7777 
 
 For the [WebSocket option](#security), add a second port: 7778, protocol `WS`, **TLS Upgrade** on, named `relay-ws`. Players connect to `wss://<host>.pr.edgegap.net:<its external port>`, by host name (the certificate is for `*.pr.edgegap.net`, not the IP). Tested on Edgegap on 2026-11-02: `./e2e.sh wss://<host>.pr.edgegap.net:<port> 0` and the mixed test (`CLIENT_RELAY`) passed on all four netcodes.
 
-Tested on Edgegap on 2026-10-29: `./e2e.sh <host>.pr.edgegap.net <port>` through a relay deployed in Newark passed on Mirror, FishNet, PurrNet and NGO. One deployment serves many rooms; a lobby or matchmaker can also deploy one relay per match near the players.
+Tested on Edgegap on 2026-10-29: `./e2e.sh <host>.pr.edgegap.net <port>` through a relay deployed in Newark passed on Mirror, FishNet, PurrNet and NGO. One deployment serves many rooms, with room codes or through the matchmaker (several match rooms per relay, above).
 
 The `tanks/` project comes from commit `01d82b3` of edgegap/netcode-game-sample-unity-mirror-tanks.
 
