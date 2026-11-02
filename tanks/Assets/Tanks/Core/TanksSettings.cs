@@ -48,6 +48,8 @@ namespace Tanks
         public bool matchmakerUseWebSocket = false;
         [Tooltip("Name of that WS port on the relay's Edgegap app version.")]
         public string matchmakerWebSocketPortName = "relay-ws";
+        [Tooltip("Ping Edgegap's latency beacons and send the results in each ticket, so players are matched with players and relays near them. Needs a 'beacons' latencies rule in the profile (matchmaker-config.json has one); turn it off for a profile without it. Not available in browsers.")]
+        public bool matchmakerLatencyBeacons = true;
 
         /// <summary>Room code the host must create: set for a matchmade match, null when the relay picks one.</summary>
         [NonSerialized] public string hostRoomCode;
@@ -87,6 +89,7 @@ namespace Tanks
                 string mmToken = Args.Value("-matchmakerToken");
                 if (!string.IsNullOrEmpty(mmToken)) current.matchmakerToken = mmToken;
                 if (Args.Flag("-matchmakerWebSocket")) current.matchmakerUseWebSocket = true;
+                if (Args.Flag("-noBeacons")) current.matchmakerLatencyBeacons = false;
                 string mmProfile = Args.Value("-matchmakerProfile");
                 if (!string.IsNullOrEmpty(mmProfile)) current.matchmakerProfile = mmProfile;
                 return current;

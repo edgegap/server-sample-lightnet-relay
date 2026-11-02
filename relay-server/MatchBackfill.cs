@@ -8,10 +8,12 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 
-// Join in progress for a match relay: while the match room has free seats, keep backfills open on the Edgegap
-// matchmaker. A backfill is a relay-owned ticket that carries this deployment's address; when the matchmaker puts a
-// player's ticket in it, that player gets HOST_ASSIGNED with this relay, asks for its role (MatchRole) and joins the
-// running match like the others. Same loop as the verified Megacity Metro sample (EdgegapBackfillSystem.cs).
+// Backfills for a match relay. A backfill is a relay-owned ticket that carries this deployment's address; when the
+// matchmaker puts a player's ticket in it, that player gets HOST_ASSIGNED with this relay and asks for its role
+// (MatchRole). Each backfill is opened for a key the relay chooses: a room code (a seat in that room) or NewRoom (the
+// player hosts a new room on this relay). The relay says how many it wants per key, in priority order; this class
+// keeps that many open, at most MaxOpen in all, creating them no faster than CreateSpacingSeconds apart.
+// Same API flow as the verified Megacity Metro sample (EdgegapBackfillSystem.cs).
 //
 // Needs MATCHMAKER_URL and MATCHMAKER_TOKEN (the matchmaker's client-safe Auth Token) on the app version, and the
 // variables Edgegap injects into matchmaker deployments (MM_*, ARBITRIUM_*). Runs on the relay's main loop: HTTP calls
@@ -19,21 +21,32 @@ using System.Threading.Tasks;
 
 class MatchBackfill
 {
-    const int MaxOpen = 2;              // backfills open at once; each seats one player
-    const double PollSeconds = 2;
-    const double RetrySeconds = 5;      // after a failed create (429: rate limited)
+    public const string NewRoom = "new room";
 
-    /// <summary>A player's ticket was put in one of our backfills: it is now part of the match.</summary>
-    public Action<string> OnTicketAssigned;
+    /// <summary>How many backfills the relay wants open for a key, and the real players' tickets to send with them.</summary>
+    public struct Want
+    {
+        public string Key;
+        public int Count;
+        public List<JsonObject> Tickets;
+    }
+
+    const int MaxOpen = 5;                      // per relay: backfill creation is rate limited (5/s on the free tier)
+    const double CreateSpacingSeconds = 0.3;
+    const double PollSeconds = 2;
+    const double RetrySeconds = 5;              // after a failed create (429: rate limited)
+    const int MaxTicketsPerBackfill = 8;
+
+    /// <summary>The matchmaker put a player's ticket in one of our backfills: key, ticket id, ticket.</summary>
+    public Action<string, string, JsonObject> OnTicketAssigned;
 
     readonly HttpClient http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
     readonly string url, profile;
     readonly JsonObject assignment;
-    readonly Dictionary<string, JsonObject> tickets = new Dictionary<string, JsonObject>(); // real players' tickets, sent with each backfill
-    readonly HashSet<string> open = new HashSet<string>();
-    readonly HashSet<string> busy = new HashSet<string>();  // backfills with a poll or delete in flight
+    readonly Dictionary<string, string> open = new Dictionary<string, string>();   // backfill id -> key
+    readonly Dictionary<string, int> creating = new Dictionary<string, int>();     // key -> creates in flight
+    readonly HashSet<string> busy = new HashSet<string>();                         // backfills with a poll or delete in flight
     readonly ConcurrentQueue<Action> results = new ConcurrentQueue<Action>();
-    int creating;
     DateTime nextPoll, nextCreate;
     bool closing;
     string lastSummary;
@@ -47,7 +60,7 @@ class MatchBackfill
     }
 
     /// <summary>Null (with the reason logged) when this relay can't backfill: not started by the matchmaker, or no matchmaker URL/token.</summary>
-    public static MatchBackfill FromEnvironment(IEnumerable<string> ticketIds)
+    public static MatchBackfill FromEnvironment()
     {
         string url = Environment.GetEnvironmentVariable("MATCHMAKER_URL");
         string token = Environment.GetEnvironmentVariable("MATCHMAKER_TOKEN");
@@ -80,44 +93,61 @@ class MatchBackfill
             ["ports"] = portMap.DeepClone(),
             ["location"] = Parse(Environment.GetEnvironmentVariable("ARBITRIUM_DEPLOYMENT_LOCATION")) ?? new JsonObject(),
         };
-
-        var backfill = new MatchBackfill(url, token, profile, assignment);
-        foreach (string id in ticketIds)
-        {
-            if (Parse(Environment.GetEnvironmentVariable("MM_TICKET_" + id)) is JsonObject ticket) backfill.tickets[id] = Ticket(ticket);
-        }
-        if (backfill.tickets.Count == 0)
-        {
-            Console.WriteLine("backfill: off (no MM_TICKET_<id> to send with backfills)");
-            return null;
-        }
-        Console.WriteLine($"backfill: on, matchmaker {backfill.url}, profile {profile}");
-        return backfill;
+        Console.WriteLine($"backfill: on, matchmaker {url.TrimEnd('/')}, profile {profile}");
+        return new MatchBackfill(url, token, profile, assignment);
     }
 
-    /// <summary>Call every loop iteration; <paramref name="countFreeSeats"/> counts the seats the match can still give out.</summary>
-    public void Update(Func<int> countFreeSeats)
+    /// <summary>A matched player's ticket as the matchmaker injected it (MM_TICKET_&lt;id&gt;), in the shape backfills take; null if missing.</summary>
+    public static JsonObject TicketFromEnvironment(string id)
+    {
+        return Parse(Environment.GetEnvironmentVariable("MM_TICKET_" + id)) is JsonObject t ? Ticket(t) : null;
+    }
+
+    /// <summary>Call every loop iteration. <paramref name="wants"/> lists what to keep open, most important first.</summary>
+    public void Update(Func<List<Want>> wants)
     {
         while (results.TryDequeue(out Action apply)) apply();
         if (closing) return;
-        int freeSeats = countFreeSeats(); // after the results: a seated player takes a seat
         DateTime now = DateTime.UtcNow;
 
-        int target = Math.Clamp(freeSeats, 0, MaxOpen);
-        if (open.Count + creating < target && now >= nextCreate) Create();
-        else if (open.Count > target && creating == 0)
+        // after the results: a seated player takes a seat
+        var targets = new Dictionary<string, int>();
+        var tickets = new Dictionary<string, List<JsonObject>>();
+        int budget = MaxOpen;
+        foreach (Want want in wants())
         {
-            string extra = open.FirstOrDefault(id => !busy.Contains(id));
-            if (extra != null) Delete(extra);
+            int count = want.Tickets == null || want.Tickets.Count == 0 ? 0 : Math.Clamp(want.Count, 0, budget);
+            budget -= count;
+            targets[want.Key] = count;
+            tickets[want.Key] = want.Tickets;
+        }
+
+        // open what is missing, in priority order, one create at a time
+        foreach (var target in targets)
+        {
+            if (now < nextCreate) break;
+            if (Have(target.Key) < target.Value)
+            {
+                Create(target.Key, tickets[target.Key]);
+                nextCreate = now.AddSeconds(CreateSpacingSeconds);
+            }
+        }
+
+        // close what is no longer wanted (a room filled up or closed)
+        foreach (var group in open.GroupBy(b => b.Value).ToList())
+        {
+            int extra = group.Count() + Creating(group.Key) - (targets.TryGetValue(group.Key, out int t) ? t : 0);
+            foreach (string id in group.Select(b => b.Key).Where(id => !busy.Contains(id)).Take(Math.Max(0, extra)).ToList()) Delete(id);
         }
 
         if (now >= nextPoll)
         {
             nextPoll = now.AddSeconds(PollSeconds);
-            foreach (string id in open.Where(id => !busy.Contains(id)).ToList()) Poll(id);
+            foreach (string id in open.Keys.Where(id => !busy.Contains(id)).ToList()) Poll(id);
         }
 
-        string summary = $"{freeSeats} free seat(s), {open.Count} backfill(s) open";
+        string summary = targets.Count == 0 && open.Count == 0 ? "nothing to fill"
+            : string.Join(", ", targets.Keys.Union(open.Values).Distinct().Select(k => $"{k}: {open.Values.Count(v => v == k)} open / {(targets.TryGetValue(k, out int n) ? n : 0)} wanted"));
         if (summary != lastSummary)
         {
             lastSummary = summary;
@@ -137,33 +167,37 @@ class MatchBackfill
         do
         {
             while (results.TryDequeue(out Action apply)) apply();
-            if (creating > 0) System.Threading.Thread.Sleep(50);
-        } while (creating > 0 && DateTime.UtcNow < deadline);
+            if (creating.Values.Sum() > 0) System.Threading.Thread.Sleep(50);
+        } while (creating.Values.Sum() > 0 && DateTime.UtcNow < deadline);
         if (open.Count == 0) return;
         Console.WriteLine($"backfill: closing {open.Count} backfill(s)");
-        Task[] deletes = open.Select(id => http.DeleteAsync($"{url}/backfills/{id}")).ToArray<Task>();
+        Task[] deletes = open.Keys.Select(id => http.DeleteAsync($"{url}/backfills/{id}")).ToArray<Task>();
         try { Task.WaitAll(deletes, TimeSpan.FromSeconds(5)); } catch (Exception) { }
         open.Clear();
     }
 
-    void Create()
+    int Creating(string key) => creating.TryGetValue(key, out int n) ? n : 0;
+    int Have(string key) => open.Values.Count(k => k == key) + Creating(key);
+
+    void Create(string key, List<JsonObject> tickets)
     {
-        creating++;
+        creating[key] = Creating(key) + 1;
         var body = new JsonObject
         {
             ["profile"] = profile,
             ["attributes"] = new JsonObject { ["assignment"] = assignment.DeepClone() },
-            // the new player is checked against the profile's rules with these real players' tickets
-            ["tickets"] = new JsonObject(tickets.Take(8).Select(t => KeyValuePair.Create(t.Key, (JsonNode)t.Value.DeepClone()))),
+            // the new player is checked against the profile's rules (latency) with these real players' tickets
+            ["tickets"] = new JsonObject(tickets.Take(MaxTicketsPerBackfill)
+                .Select(t => KeyValuePair.Create(t["id"].GetValue<string>(), (JsonNode)t.DeepClone()))),
         };
         Send(HttpMethod.Post, "/backfills", body, (status, json) =>
         {
-            creating--;
+            creating[key] = Creating(key) - 1;
             string id = json?["id"]?.GetValue<string>();
             if ((status == HttpStatusCode.OK || status == HttpStatusCode.Created) && id != null)
             {
-                open.Add(id);
-                Console.WriteLine($"backfill: opened {id}");
+                open[id] = key;
+                Console.WriteLine($"backfill: opened {id} for {key}");
             }
             else
             {
@@ -179,6 +213,7 @@ class MatchBackfill
         Send(HttpMethod.Get, "/backfills/" + id, null, (status, json) =>
         {
             busy.Remove(id);
+            if (!open.TryGetValue(id, out string key)) return;
             if (status == HttpStatusCode.NotFound)
             {
                 open.Remove(id); // expired after the profile's ticket_expiration_period: a new one opens
@@ -190,9 +225,8 @@ class MatchBackfill
                 open.Remove(id);
                 string ticketId = assigned["id"]?.GetValue<string>();
                 if (ticketId == null) return;
-                tickets[ticketId] = Ticket(assigned);
-                Console.WriteLine($"backfill: {id} seated ticket {ticketId}");
-                OnTicketAssigned?.Invoke(ticketId);
+                Console.WriteLine($"backfill: {id} seated ticket {ticketId} ({key})");
+                OnTicketAssigned?.Invoke(key, ticketId, Ticket(assigned));
             }
             else if (state.Contains("CANCEL") || state.Contains("EXPIRE"))
             {
