@@ -110,6 +110,8 @@ Automated test: two clients press Find Match and play one match through the rela
 ./e2e-matchmaker.sh https://<id>.edgegap.net <matchmaker token> FishNet NGO
 ```
 
+Tested on Edgegap on 2026-11-02 (matchmaker 3.3.2, free tier): passed on Mirror, FishNet, PurrNet and NGO, one relay deployment per match in Newark, each stopped by the relay itself (`TERMINATED`) when the host left.
+
 ## Changes to LightNet
 
 Upstream LightNet assumed a server that can reach its clients directly. To run as a relay behind Docker or Edgegap port mapping:
