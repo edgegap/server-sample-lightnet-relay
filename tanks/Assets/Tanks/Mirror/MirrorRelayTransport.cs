@@ -80,7 +80,10 @@ namespace Tanks.MirrorRelay
 
         public override Uri ServerUri()
         {
-            return new UriBuilder("lightnet", HostRelayAddress(), relayTcpPort) { Query = "room=" + RoomCode }.Uri;
+            string address = HostRelayAddress();
+            // a ws:// or wss:// relay address is already a URL
+            if (RelayWebSocket.IsWebSocketAddress(address)) return new UriBuilder(address) { Query = "room=" + RoomCode }.Uri;
+            return new UriBuilder("lightnet", address, relayTcpPort) { Query = "room=" + RoomCode }.Uri;
         }
 
         public override bool ServerActive() => host != null && host.IsActive;

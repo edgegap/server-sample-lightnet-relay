@@ -9,7 +9,7 @@
       "group_inactivity_removal_period": "5m",
       "application": {
         "name": "lightnet-relay",
-        "version": "20261102-1428"
+        "version": "20261102-1600"
       },
       "rules": {
         "initial": {

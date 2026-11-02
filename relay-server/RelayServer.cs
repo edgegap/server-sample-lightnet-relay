@@ -13,7 +13,11 @@ using LightNet.Relay;
 // needs an open port. The server forwards client traffic to the host and host traffic to the client
 // it is addressed to, on the channel it came in on.
 //
-// Environment: RELAY_TCP_PORT (default 7777), RELAY_UDP_PORT (default 7777), RELAY_MAX_PEERS (default 256)
+// Players can also connect over WebSocket (RELAY_WS_PORT, see WebSocketPeers): on Edgegap, a WS port with
+// TLS Upgrade makes that wss://, encrypted between the player and Edgegap. Both kinds of players share rooms.
+//
+// Environment: RELAY_TCP_PORT (default 7777), RELAY_UDP_PORT (default 7777), RELAY_WS_PORT (default 7778, 0 = off),
+// RELAY_MAX_PEERS (default 256)
 // Exits when it gets SIGTERM / Ctrl+C, or after RELAY_IDLE_EXIT_SECONDS without any room (default 600, 0 = never).
 //
 // Match mode: when the Edgegap matchmaker starts the relay for a match, it injects MM_TICKET_IDS (the
@@ -33,6 +37,7 @@ class RelayServer
     }
 
     readonly NetworkService net = new NetworkService();
+    readonly WebSocketPeers webSockets = new WebSocketPeers();
     readonly Dictionary<string, Room> rooms = new Dictionary<string, Room>();
     readonly Dictionary<ulong, Room> roomOf = new Dictionary<ulong, Room>();
     long forwardedReliable, forwardedUnreliable;
@@ -49,10 +54,11 @@ class RelayServer
         int tcpPort = Env("RELAY_TCP_PORT", RelayProtocol.DefaultPort);
         int udpPort = Env("RELAY_UDP_PORT", RelayProtocol.DefaultPort);
         int maxPeers = Env("RELAY_MAX_PEERS", 256);
+        int wsPort = Env("RELAY_WS_PORT", RelayProtocol.DefaultPort + 1);
         var server = new RelayServer();
         server.ReadMatch();
         int idleExit = Env("RELAY_IDLE_EXIT_SECONDS", server.matchTickets != null ? 60 : 600);
-        int code = server.Run(tcpPort, udpPort, maxPeers, idleExit, out bool stoppedItself);
+        int code = server.Run(tcpPort, udpPort, wsPort, maxPeers, idleExit, out bool stoppedItself);
         if (stoppedItself) StopDeployment();
         return code;
     }
@@ -74,7 +80,7 @@ class RelayServer
         Console.WriteLine($"match mode: match {Environment.GetEnvironmentVariable("MM_MATCH_ID") ?? "?"}, {matchTickets.Count} matched player(s)");
     }
 
-    int Run(int tcpPort, int udpPort, int maxPeers, int idleExitSeconds, out bool stoppedItself)
+    int Run(int tcpPort, int udpPort, int wsPort, int maxPeers, int idleExitSeconds, out bool stoppedItself)
     {
         stoppedItself = false;
         if (!net.StartServer(tcpPort, udpPort, maxPeers))
@@ -84,6 +90,17 @@ class RelayServer
             return 1;
         }
         Console.WriteLine($"LightNet relay listening on TCP {tcpPort}, UDP {udpPort}, max {maxPeers} peers");
+        if (wsPort > 0)
+        {
+            if (!webSockets.Start(wsPort, maxPeers))
+            {
+                net.Close();
+        webSockets.Stop();
+                FlushLogs();
+                return 1;
+            }
+            Console.WriteLine($"WebSocket relay listening on TCP {wsPort}");
+        }
 
         bool stop = false;
         Console.CancelKeyPress += (s, e) => { e.Cancel = true; stop = true; };
@@ -103,6 +120,12 @@ class RelayServer
             while (net.GetNextMessage(out byte[] msg, out ConnectionHandle from, out ENetChannel channel))
             {
                 if (msg.Length > 0) Handle(from.GetInternalHandle(), msg, channel);
+            }
+            while (webSockets.TryGetEvent(out WebSocketPeers.Event ws))
+            {
+                if (ws.Type == WebSocketPeers.EventType.Connected) Console.WriteLine($"peer {ws.Peer} connected over WebSocket ({ws.Name})");
+                else if (ws.Type == WebSocketPeers.EventType.Disconnected) Left(ws.Peer);
+                else if (ws.Message.Length > 0) Handle(ws.Peer, ws.Message, ws.Channel);
             }
 
             if (matchOver)
@@ -215,7 +238,8 @@ class RelayServer
                 if (room.Clients.Contains(peer))
                 {
                     Console.WriteLine($"host of room {room.Code} kicked peer {peer}");
-                    net.Disconnect(new ConnectionHandle(peer));
+                    if (WebSocketPeers.Owns(peer)) webSockets.Disconnect(peer);
+                    else net.Disconnect(new ConnectionHandle(peer));
                     Left(peer);
                 }
                 break;
@@ -264,7 +288,8 @@ class RelayServer
 
     void Send(ulong to, ENetChannel channel, byte[] msg)
     {
-        net.SendMessage(new ConnectionHandle(to), channel, msg);
+        if (WebSocketPeers.Owns(to)) webSockets.Send(to, channel, msg);
+        else net.SendMessage(new ConnectionHandle(to), channel, msg);
     }
 
     void Count(ENetChannel channel)
