@@ -9,7 +9,9 @@ namespace LightNet.Relay
     /// <summary>
     /// A game's connection to the LightNet relay server, as the room host or as a client.<br/>
     /// Netcode agnostic: a transport (Mirror, FishNet, NGO, PurrNet...) calls <see cref="Poll"/> once per
-    /// frame on the main thread and maps the callbacks to its own connect, data and disconnect events.
+    /// frame on the main thread and maps the callbacks to its own connect, data and disconnect events.<br/>
+    /// The relay address picks the connection: a host name or IP uses LightNet's TCP + UDP, and a <c>ws://</c> or
+    /// <c>wss://</c> URL uses one WebSocket (<see cref="RelayWebSocket"/>; the ports are then in the URL).
     /// </summary>
     public class RelayPeer
     {
@@ -31,13 +33,14 @@ namespace LightNet.Relay
 
         public bool IsHost { get; private set; }
         public bool IsReady { get; private set; }   // host: room created, client: joined
-        public bool IsActive => service != null;
+        public bool IsActive => service != null || ws != null;
         public string RoomCode { get; private set; }
 
         /// <summary>Payload bytes received from other players, per channel, by every peer in this process (for tests).</summary>
         public static long TotalReceivedReliable, TotalReceivedUnreliable;
 
-        NetworkService service;
+        NetworkService service;   // TCP + UDP
+        RelayWebSocket ws;        // or WebSocket
         ConnectionHandle relay;
         string joinCode;
         string hostCode;
@@ -75,6 +78,11 @@ namespace LightNet.Relay
         void Start(string relayAddress, int tcpPort, int udpPort)
         {
             Close();
+            if (RelayWebSocket.IsWebSocketAddress(relayAddress))
+            {
+                ws = new RelayWebSocket(relayAddress.Trim());
+                return;
+            }
             IPAddress address = Resolve(relayAddress);
             service = new NetworkService();
             if (address == null || !service.StartClient(address, tcpPort, udpPort))
@@ -89,25 +97,59 @@ namespace LightNet.Relay
         {
             if (!IsReady) return;
             byte[] msg = IsHost ? RelayProtocol.Make(RelayMsg.ToPeer, peerId, payload) : RelayProtocol.Make(RelayMsg.ToHost, payload);
-            service.SendMessage(relay, channel, msg);
+            Transmit(channel, msg);
         }
 
         public void Kick(uint peerId)
         {
-            if (IsReady && IsHost) service.SendMessage(relay, ENetChannel.Reliable, RelayProtocol.Make(RelayMsg.KickPeer, peerId));
+            if (IsReady && IsHost) Transmit(ENetChannel.Reliable, RelayProtocol.Make(RelayMsg.KickPeer, peerId));
         }
 
         public void Close()
         {
-            if (service == null) return;
+            if (!IsActive) return;
+            DropLink();
+            Ended("closed");
+        }
+
+        void Transmit(ENetChannel channel, byte[] msg)
+        {
+            if (service != null) service.SendMessage(relay, channel, msg);
+            else ws?.Send(channel, msg);
+        }
+
+        void DropLink()
+        {
             NetworkService s = service;
             service = null;
-            if (s.GetState() != ENetworkState.Closed) s.Close();
-            Ended("closed");
+            if (s != null && s.GetState() != ENetworkState.Closed) s.Close();
+            ws?.Close();
+            ws = null;
+        }
+
+        byte[] Hello()
+        {
+            return matchTicket != null ? RelayProtocol.Make(RelayMsg.MatchRole, matchTicket)
+                : IsHost ? (hostCode != null ? RelayProtocol.Make(RelayMsg.CreateRoom, hostCode) : RelayProtocol.Make(RelayMsg.CreateRoom))
+                : RelayProtocol.Make(RelayMsg.JoinRoom, joinCode);
         }
 
         public void Poll()
         {
+            if (ws != null)
+            {
+                if (!connected && ws.IsOpen)
+                {
+                    connected = true;
+                    ws.Send(ENetChannel.Reliable, Hello());
+                }
+                while (ws != null && ws.TryReceive(out byte[] wsMsg, out ENetChannel wsChannel))
+                {
+                    if (wsMsg.Length > 0) Handle(wsMsg, wsChannel);
+                }
+                if (ws != null && ws.IsClosed) CloseWith(ws.CloseReason);
+                return;
+            }
             if (service == null) return;
 
             while (service != null && service.GetNextEvent(out ConnectionEvent ev))
@@ -116,10 +158,7 @@ namespace LightNet.Relay
                 {
                     connected = true;
                     relay = ev.Connection;
-                    byte[] hello = matchTicket != null ? RelayProtocol.Make(RelayMsg.MatchRole, matchTicket)
-                        : IsHost ? (hostCode != null ? RelayProtocol.Make(RelayMsg.CreateRoom, hostCode) : RelayProtocol.Make(RelayMsg.CreateRoom))
-                        : RelayProtocol.Make(RelayMsg.JoinRoom, joinCode);
-                    service.SendMessage(relay, ENetChannel.Reliable, hello);
+                    service.SendMessage(relay, ENetChannel.Reliable, Hello());
                 }
                 else if (ev.EventType == ConnectionEvent.EType.Disconnected)
                 {
@@ -159,10 +198,8 @@ namespace LightNet.Relay
                         bool isHost = msg[1] == 1;
                         string code = Encoding.ASCII.GetString(msg, 2, msg.Length - 2);
                         // done with this connection: close it without OnDisconnected
-                        NetworkService s = service;
-                        service = null;
+                        DropLink();
                         connected = false;
-                        if (s.GetState() != ENetworkState.Closed) s.Close();
                         OnMatchAssigned?.Invoke(isHost, code);
                     }
                     break;
@@ -206,9 +243,7 @@ namespace LightNet.Relay
 
         void CloseWith(string reason)
         {
-            NetworkService s = service;
-            service = null;
-            if (s != null && s.GetState() != ENetworkState.Closed) s.Close();
+            DropLink();
             Ended(reason);
         }
 

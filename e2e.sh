@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Two Tanks clients (host + joiner) through the LightNet relay, on one netcode or all four.
 # Usage: ./e2e.sh [relay-address] [port] [netcode...]     netcode: Mirror FishNet PurrNet NGO (default: all)
+# relay-address may be a ws:// or wss:// URL (WebSocket; the port argument is then ignored).
+# CLIENT_RELAY=<address> gives the joining client another relay address than the host, e.g. the host on TCP/UDP
+# and the client on WebSocket: CLIENT_RELAY=ws://127.0.0.1:7778 ./e2e.sh 127.0.0.1 7777
 # Runs on Windows (Git Bash). Expects tanks/Builds/Windows/Tanks.exe (Tanks > Build Windows client) and a running relay (see README).
 set -u
 cd "$(dirname "$0")"
@@ -16,8 +19,8 @@ for NC in $NETCODES; do
   OUT=e2e-out/$NC
   rm -rf "$OUT" && mkdir -p "$OUT"
   echo "== $NC"
-  COMMON="-batchmode -nographics -netcode $NC -relay $RELAY -relayPort $PORT -e2e -expectTanks 2 -timeout 90"
-  "$EXE" $COMMON -host -codeFile "$OUT/code.txt" -logFile "$OUT/host.log" &
+  COMMON="-batchmode -nographics -netcode $NC -relayPort $PORT -e2e -expectTanks 2 -timeout 90"
+  "$EXE" $COMMON -relay "$RELAY" -host -codeFile "$OUT/code.txt" -logFile "$OUT/host.log" &
   HOST=$!
 
   for _ in $(seq 1 30); do [ -s "$OUT/code.txt" ] && break; sleep 1; done
@@ -27,7 +30,7 @@ for NC in $NETCODES; do
   CODE=$(cat "$OUT/code.txt")
   echo "room code: $CODE"
 
-  "$EXE" $COMMON -join "$CODE" -logFile "$OUT/client.log" &
+  "$EXE" $COMMON -relay "${CLIENT_RELAY:-$RELAY}" -join "$CODE" -logFile "$OUT/client.log" &
   CLIENT=$!
 
   wait $CLIENT; C=$?

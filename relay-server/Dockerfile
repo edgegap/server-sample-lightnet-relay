@@ -3,13 +3,14 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 COPY LightNet/Runtime LightNet/Runtime
-COPY relay-server/RelayServer.csproj relay-server/RelayServer.cs relay-server/
+COPY relay-server/RelayServer.csproj relay-server/*.cs relay-server/
 RUN dotnet publish relay-server/RelayServer.csproj -c Release -o /app
 
 FROM mcr.microsoft.com/dotnet/runtime:8.0
 WORKDIR /app
 COPY --from=build /app .
 ENV RELAY_TCP_PORT=7777 \
-    RELAY_UDP_PORT=7777
-EXPOSE 7777/tcp 7777/udp
+    RELAY_UDP_PORT=7777 \
+    RELAY_WS_PORT=7778
+EXPOSE 7777/tcp 7777/udp 7778/tcp
 ENTRYPOINT ["dotnet", "lightnet-relay.dll"]

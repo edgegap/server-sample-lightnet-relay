@@ -98,7 +98,7 @@ namespace Tanks
                     return;
                 }
                 settings.netcode = session.Netcode;
-                Debug.Log($"Tanks: running on {session.Netcode} through the LightNet relay at {settings.relayAddress}:{settings.relayTcpPort}/{settings.relayUdpPort}");
+                Debug.Log($"Tanks: running on {session.Netcode} through the LightNet relay at {settings.RelayLabel}");
             }
 
             if (!autoStarted)
@@ -162,7 +162,7 @@ namespace Tanks
         {
             if (session == null) return;
             GUILayout.BeginArea(new Rect(10, 10, 300, 400));
-            GUILayout.Label($"Netcode: {session.Netcode}   Relay: {settings.relayAddress}:{settings.relayTcpPort}");
+            GUILayout.Label($"Netcode: {session.Netcode}   Relay: {settings.RelayLabel}");
 
             if (!session.IsActive)
             {
