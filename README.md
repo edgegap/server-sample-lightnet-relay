@@ -1,5 +1,7 @@
 # Small network relay with game sample using Mirror, FishNet, PurrNet or NGO
 
+![Host a LightNet relay on Edgegap and play Mirror's Tanks sample through it with Mirror, FishNet, PurrNet or NGO.](docs/images/card.jpg)
+
 A small network relay built on [LightNet](https://github.com/edgegap/server-sample-unity-smart-relays) that runs in a Docker container (and so on Edgegap), and Mirror's Tanks sample playing through it on **Mirror, FishNet, PurrNet or Netcode for GameObjects (NGO)**: one setting picks the netcode. One player hosts a room and gets a 6-letter code; the other joins with the code. Neither game opens a port: both are clients of the relay.
 
 | Folder | What it is |
