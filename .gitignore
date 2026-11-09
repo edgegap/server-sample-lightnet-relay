@@ -5,3 +5,5 @@ tanks/UserSettings/
 tanks/build.log
 .vs/
 *.log
+e2e-webgl/
+e2e-webgl-edgegap/
