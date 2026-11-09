@@ -74,7 +74,19 @@ What protects players today:
 
 The trade-off: WebSocket runs over TCP only, so "unreliable" messages are sent reliably and in order. On a lossy connection that adds delay, which is fine for co-op and turn-based games, less so for fast shooters. So it is an option next to TCP + UDP, not a replacement, and a host on TCP + UDP and a client on WebSocket can play in the same room.
 
-Use it by giving the game a `ws://` or `wss://` relay address instead of a host name (`TanksSettings.asset`, the HUD, or `-relay wss://<host>.pr.edgegap.net:<external port>`); with the matchmaker, turn on `matchmakerUseWebSocket` (`-matchmakerWebSocket`). It works on desktop and mobile builds (.NET `ClientWebSocket`); a WebGL build would also need a browser WebSocket bridge, which the sample doesn't have yet.
+Use it by giving the game a `ws://` or `wss://` relay address instead of a host name (`TanksSettings.asset`, the HUD, or `-relay wss://<host>.pr.edgegap.net:<external port>`); with the matchmaker, turn on `matchmakerUseWebSocket` (`-matchmakerWebSocket`). It works on desktop and mobile builds (.NET `ClientWebSocket`) and in the browser ([WebGL](#play-in-the-browser-webgl)).
+
+## Play in the browser (WebGL)
+
+A WebGL build connects to the relay over `wss://` and can host or join, on all four netcodes, in the same rooms as desktop players.
+
+Browsers have no TCP/UDP sockets, no .NET `ClientWebSocket` and no C# threads, so in a WebGL build `RelayWebSocket` uses the browser's own WebSocket through a small bridge, [`LightNet/Runtime/Relay/RelayWebSocket.jslib`](LightNet/Runtime/Relay/RelayWebSocket.jslib). The browser queues what it receives and the transport drains it once per frame, as on desktop, so the netcode transports didn't change.
+
+- Build: **Tanks > Build WebGL client** (`tanks/Builds/WebGL`, uncompressed so any static file server works).
+- A WebGL build has no command line: it reads the same options from the page URL, e.g. `index.html?relay=wss://<host>.pr.edgegap.net:<external port>&join=ABCDEF` or `&host`, `&netcode=FishNet`. The HUD works too.
+- Use the relay's `wss://` address (the `relay-ws` port with TLS Upgrade). A page served over HTTPS can't open `ws://`.
+- A browser host stops updating while its tab is in the background (browsers throttle hidden tabs), so its room freezes until the tab is back. A desktop host avoids that.
+- With the matchmaker, browsers can't ping Edgegap's beacons: give WebGL players a profile without the `beacons` latency rule.
 
 ## Run it
 
@@ -185,6 +197,8 @@ Upstream LightNet assumed a server that can reach its clients directly. To run a
 The app version needs one port: 7777 with protocol `TCP/UDP` (two separate 7777 TCP and 7777 UDP entries are rejected as duplicates). Edgegap maps both protocols to the same external port, so clients pass it once: `-relay <host>.pr.edgegap.net -relayPort <external port>`. Edgegap's readiness check opens a TCP connection at start, which shows in the relay log as a peer that connects and leaves.
 
 For the [WebSocket option](#security), add a second port: 7778, protocol `WS`, **TLS Upgrade** on, named `relay-ws`. Players connect to `wss://<host>.pr.edgegap.net:<its external port>`, by host name (the certificate is for `*.pr.edgegap.net`, not the IP). Tested on Edgegap on 2026-11-02: `./e2e.sh wss://<host>.pr.edgegap.net:<port> 0` and the mixed test (`CLIENT_RELAY`) passed on all four netcodes.
+
+Tested on Edgegap on 2026-11-09 with the WebGL build in headless Chrome, through a relay in Toronto: a desktop host (TCP + UDP) with a browser client, a browser host with a desktop client, and a browser host with a browser client all passed on Mirror, FishNet, PurrNet and NGO.
 
 Tested on Edgegap on 2026-10-29: `./e2e.sh <host>.pr.edgegap.net <port>` through a relay deployed in Newark passed on Mirror, FishNet, PurrNet and NGO. One deployment serves many rooms, with room codes or through the matchmaker (several match rooms per relay, above).
 
