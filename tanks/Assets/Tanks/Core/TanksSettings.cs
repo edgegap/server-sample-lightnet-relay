@@ -97,15 +97,47 @@ namespace Tanks
         }
     }
 
+    /// <summary>
+    /// Command-line options. A WebGL build has no command line: it reads the same options from the page URL's query,
+    /// <c>?relay=wss://...&amp;join=ABCD&amp;netcode=FishNet</c> = <c>-relay wss://... -join ABCD -netcode FishNet</c>
+    /// (a key without a value is a flag: <c>?host</c>).
+    /// </summary>
     public static class Args
     {
+        static string[] all;
+
+        static string[] All => all ??= Read();
+
         public static string Value(string name)
         {
-            string[] args = Environment.GetCommandLineArgs();
+            string[] args = All;
             int i = Array.FindIndex(args, a => string.Equals(a, name, StringComparison.OrdinalIgnoreCase));
             return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
         }
 
-        public static bool Flag(string name) => Environment.GetCommandLineArgs().Any(a => string.Equals(a, name, StringComparison.OrdinalIgnoreCase));
+        public static bool Flag(string name) => All.Any(a => string.Equals(a, name, StringComparison.OrdinalIgnoreCase));
+
+        static string[] Read()
+        {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            string url = Application.absoluteURL ?? "";
+            int q = url.IndexOf('?');
+            if (q < 0) return Array.Empty<string>();
+            string query = url.Substring(q + 1);
+            int hash = query.IndexOf('#');
+            if (hash >= 0) query = query.Substring(0, hash);
+            var args = new System.Collections.Generic.List<string>();
+            foreach (string pair in query.Split('&'))
+            {
+                if (pair.Length == 0) continue;
+                int eq = pair.IndexOf('=');
+                args.Add("-" + Uri.UnescapeDataString(eq < 0 ? pair : pair.Substring(0, eq)));
+                if (eq >= 0) args.Add(Uri.UnescapeDataString(pair.Substring(eq + 1).Replace('+', ' ')));
+            }
+            return args.ToArray();
+#else
+            return Environment.GetCommandLineArgs();
+#endif
+        }
     }
 }
